@@ -27,6 +27,7 @@ pub struct Storage {
 impl Storage {
     pub fn new() -> Self {
         Self {
+            //TODO: Load this definition from a file
             columns: vec![
                 Column::new("url".into(), DataType::String),
                 Column::new("timestamp".into(), DataType::Int),
