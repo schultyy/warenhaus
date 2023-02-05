@@ -1,7 +1,8 @@
 use std::convert::Infallible;
 use reqwest::StatusCode;
 use warp::Filter;
-use serde::Deserialize;
+use serde::{Serialize, Deserialize};
+use thiserror::Error;
 
 #[derive(Debug, Deserialize)]
 pub enum Value {
@@ -17,9 +18,28 @@ struct IndexParams {
     values: Vec<Value>
 }
 
+#[derive(Debug, Serialize, Error)]
+enum IndexParamError {
+    #[error("Number of fields ({0}) does not match number of provided values ({1}).")]
+    FieldValueLenMismatch(usize, usize)
+}
+
+impl IndexParams {
+    pub fn validate(&self) -> Result<(), IndexParamError> {
+        if self.fields.len() != self.values.len() {
+            return Err(IndexParamError::FieldValueLenMismatch(self.fields.len(), self.values.len()))
+        }
+        Ok(())
+    }
+}
+
 
 async fn index_handler(index_params: IndexParams) -> Result<impl warp::Reply, Infallible> {
     println!("{:?}", index_params);
+    if let Err(err) = index_params.validate() {
+        let json = warp::reply::json(&format!("{}", err));
+        return Ok(warp::reply::with_status(json, StatusCode::UNPROCESSABLE_ENTITY))
+    }
     let json = warp::reply::json(&"OK");
     Ok(warp::reply::with_status(json, StatusCode::OK))
 }
