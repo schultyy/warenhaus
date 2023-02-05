@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 use reqwest::StatusCode;
+use storage::{DataType, Cell, Storage};
 use tokio::sync::mpsc::{self, Sender};
 use warp::Filter;
 use serde::{Serialize, Deserialize};
@@ -7,13 +8,15 @@ use thiserror::Error;
 use tracing::{instrument, error};
 use tracing::debug;
 
+mod storage;
+
 fn with_tx(
     tx: Sender<Command>,
 ) -> impl Filter<Extract = (Sender<Command>,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || tx.clone())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -21,14 +24,47 @@ pub enum Value {
     Boolean(bool)
 }
 
+impl Into<storage::Cell> for Value {
+    fn into(self) -> storage::Cell {
+        match self {
+            Value::Int(value) => Cell::Int(value),
+            Value::Float(value) => Cell::Float(value),
+            Value::String(value) => Cell::String(value),
+            Value::Boolean(value) => Cell::Boolean(value),
+        }
+    }
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Int(val) => write!(f, "i64 {}", val),
+            Value::Float(val) => write!(f, "f64 {}", val),
+            Value::String(val) => write!(f, "Str {}", val),
+            Value::Boolean(val) => write!(f, "bool {}", val),
+        }
+    }
+}
+
+impl Into<DataType> for &Value {
+    fn into(self) -> DataType {
+        match self {
+            Value::Int(_) => DataType::Int,
+            Value::Float(_) => DataType::Float, 
+            Value::String(_) =>  DataType::String,
+            Value::Boolean(_) =>  DataType::Boolean,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
-struct IndexParams {
-    fields: Vec<String>,
-    values: Vec<Value>
+pub struct IndexParams {
+    pub fields: Vec<String>,
+    pub values: Vec<Value>
 }
 
 #[derive(Debug, Serialize, Error)]
-enum IndexParamError {
+pub enum IndexParamError {
     #[error("Number of fields ({0}) does not match number of provided values ({1}).")]
     FieldValueLenMismatch(usize, usize)
 }
@@ -88,8 +124,16 @@ async fn main() {
     let web_tx = manager_tx.clone();
     let mut all_workers = vec![];
     let url_manager = tokio::spawn(async move {
-        while let Some(payload) = rx.recv().await {
-            println!("Received Index Payload: {:?}", payload);
+        let mut storage_manager = Storage::new();
+        while let Some(command) = rx.recv().await {
+            println!("Received Index Payload: {:?}", command);
+            match command {
+                Command::Index(payload) => {
+                    if let Err(err) = storage_manager.index(payload) {
+                        println!("{}", err);
+                    }
+                }
+            }
         }
     });
     all_workers.push(url_manager);
