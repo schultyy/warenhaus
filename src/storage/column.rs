@@ -1,3 +1,5 @@
+use crate::config::ColumnConfig;
+
 use super::data_type::DataType;
 
 
@@ -35,5 +37,11 @@ impl Column {
 
     pub fn entries_mut(&mut self) -> &mut Vec<Cell> {
         &mut self.entries
+    }
+}
+
+impl From<ColumnConfig> for Column {
+    fn from(value: ColumnConfig) -> Self {
+        Self::new(value.name, value.data_type.into())
     }
 }

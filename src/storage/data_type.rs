@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::web::Value;
+use crate::{web::Value, config::DataTypeConfig};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum DataType {
@@ -24,6 +24,17 @@ impl Display for DataType {
             DataType::Float => write!(f, "Float"),
             DataType::String => write!(f, "String"),
             DataType::Boolean => write!(f, "bool"),
+        }
+    }
+}
+
+impl From<DataTypeConfig> for DataType {
+    fn from(value: DataTypeConfig) -> Self {
+        match value {
+            DataTypeConfig::Int => DataType::Int,
+            DataTypeConfig::Float => DataType::Float, 
+            DataTypeConfig::String => DataType::String,
+            DataTypeConfig::Boolean => DataType::Boolean,
         }
     }
 }

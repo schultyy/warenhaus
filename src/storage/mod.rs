@@ -4,6 +4,7 @@ pub mod data_type;
 use thiserror::Error;
 use tracing::{debug, instrument};
 
+use crate::config::SchemaConfig;
 use crate::web::IndexParams;
 use crate::web::Value;
 
@@ -25,13 +26,12 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn new() -> Self {
+    pub fn new(config: SchemaConfig) -> Self {
+
+        let columns = config.columns.into_iter().map(|column_config| column_config.into()).collect::<Vec<Column>>();
+
         Self {
-            //TODO: Load this definition from a file
-            columns: vec![
-                Column::new("url".into(), DataType::String),
-                Column::new("timestamp".into(), DataType::Int),
-            ],
+            columns
         }
     }
 
