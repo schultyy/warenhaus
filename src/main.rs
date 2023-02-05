@@ -48,10 +48,7 @@ async fn index_handler(index_params: IndexParams) -> Result<impl warp::Reply, In
     Ok(warp::reply::with_status(json, StatusCode::OK))
 }
 
-#[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt::init();    
-
+async fn web_handler() {
     let root = warp::path::end().map(|| "root");
 
     let index_data = warp::path!("index")
@@ -64,4 +61,11 @@ async fn main() {
     );
 
     warp::serve(endpoints).run(([127, 0, 0, 1], 3030)).await;
+}
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt::init();    
+
+    web_handler().await;
 }
