@@ -3,6 +3,8 @@ use reqwest::StatusCode;
 use warp::Filter;
 use serde::{Serialize, Deserialize};
 use thiserror::Error;
+use tracing::{instrument, Level};
+use tracing::debug;
 
 #[derive(Debug, Deserialize)]
 pub enum Value {
@@ -25,7 +27,9 @@ enum IndexParamError {
 }
 
 impl IndexParams {
+    #[instrument]
     pub fn validate(&self) -> Result<(), IndexParamError> {
+        debug!("self.fields {} | self.values {}", self.fields.len(), self.values.len());
         if self.fields.len() != self.values.len() {
             return Err(IndexParamError::FieldValueLenMismatch(self.fields.len(), self.values.len()))
         }
@@ -34,8 +38,8 @@ impl IndexParams {
 }
 
 
+#[tracing::instrument]
 async fn index_handler(index_params: IndexParams) -> Result<impl warp::Reply, Infallible> {
-    println!("{:?}", index_params);
     if let Err(err) = index_params.validate() {
         let json = warp::reply::json(&format!("{}", err));
         return Ok(warp::reply::with_status(json, StatusCode::UNPROCESSABLE_ENTITY))
@@ -46,7 +50,8 @@ async fn index_handler(index_params: IndexParams) -> Result<impl warp::Reply, In
 
 #[tokio::main]
 async fn main() {
-    // GET /hello/warp => 200 OK with body "Hello, warp!"
+    tracing_subscriber::fmt::init();    
+
     let root = warp::path::end().map(|| "root");
 
     let index_data = warp::path!("index")
