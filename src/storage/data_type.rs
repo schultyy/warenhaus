@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::web::Value;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum DataType {
     Int,
@@ -9,7 +11,7 @@ pub enum DataType {
 }
 
 impl DataType {
-    pub fn is_compatible(&self, other: &crate::Value) -> bool {
+    pub fn is_compatible(&self, other: &Value) -> bool {
         let other : DataType = other.into();
         self == &other
     }

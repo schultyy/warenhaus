@@ -4,7 +4,8 @@ pub mod column;
 use thiserror::Error;
 use tracing::{instrument, debug};
 
-use crate::IndexParams;
+use crate::web::Value;
+use crate::web::IndexParams;
 
 use self::{data_type::DataType, column::Column};
 
@@ -14,7 +15,7 @@ pub enum StorageError {
     #[error("Fields are not present in index")]
     InvalidFields(Vec<String>),
     #[error("Invalid Data Type. Expected {0}, Got {1}")]
-    InvalidDataType(crate::Value, DataType),
+    InvalidDataType(Value, DataType),
     #[error("Number of fields ({0}) does not match number of provided values ({1}).")]
     FieldCountMismatch(usize, usize)
 }
