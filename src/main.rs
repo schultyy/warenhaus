@@ -1,14 +1,14 @@
-use std::convert::Infallible;
 use reqwest::StatusCode;
+use serde::Deserialize;
+use std::convert::Infallible;
 use storage::column::Cell;
 use storage::data_type::DataType;
-use storage::Storage;
+use storage::{Storage, StorageError};
 use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::oneshot;
 use warp::Filter;
-use serde::{Serialize, Deserialize};
-use thiserror::Error;
-use tracing::{instrument, error};
-use tracing::debug;
+
+use tracing::error;
 
 mod storage;
 
@@ -23,7 +23,7 @@ pub enum Value {
     Int(i64),
     Float(f64),
     String(String),
-    Boolean(bool)
+    Boolean(bool),
 }
 
 impl Into<Cell> for Value {
@@ -52,9 +52,9 @@ impl Into<DataType> for &Value {
     fn into(self) -> DataType {
         match self {
             Value::Int(_) => DataType::Int,
-            Value::Float(_) => DataType::Float, 
-            Value::String(_) =>  DataType::String,
-            Value::Boolean(_) =>  DataType::Boolean,
+            Value::Float(_) => DataType::Float,
+            Value::String(_) => DataType::String,
+            Value::Boolean(_) => DataType::Boolean,
         }
     }
 }
@@ -62,44 +62,67 @@ impl Into<DataType> for &Value {
 #[derive(Debug, Deserialize)]
 pub struct IndexParams {
     pub fields: Vec<String>,
-    pub values: Vec<Value>
+    pub values: Vec<Value>,
 }
 
-#[derive(Debug, Serialize, Error)]
-pub enum IndexParamError {
-    #[error("Number of fields ({0}) does not match number of provided values ({1}).")]
-    FieldValueLenMismatch(usize, usize)
-}
-
-impl IndexParams {
-    #[instrument]
-    pub fn validate(&self) -> Result<(), IndexParamError> {
-        debug!("self.fields {} | self.values {}", self.fields.len(), self.values.len());
-        if self.fields.len() != self.values.len() {
-            return Err(IndexParamError::FieldValueLenMismatch(self.fields.len(), self.values.len()))
-        }
-        Ok(())
-    }
-}
+type InsertResponder = oneshot::Sender<Result<(), StorageError>>;
 
 #[derive(Debug)]
 enum Command {
-    Index(IndexParams)
+    Index {
+        params: IndexParams,
+        responder: InsertResponder,
+    },
 }
 
 #[tracing::instrument]
-async fn index_handler(tx: Sender<Command>, index_params: IndexParams) -> Result<impl warp::Reply, Infallible> {
-    if let Err(err) = index_params.validate() {
-        let json = warp::reply::json(&format!("{}", err));
-        return Ok(warp::reply::with_status(json, StatusCode::UNPROCESSABLE_ENTITY))
-    }
+async fn index_handler(
+    tx: Sender<Command>,
+    index_params: IndexParams,
+) -> Result<impl warp::Reply, Infallible> {
+    let (resp_tx, resp_rx) = oneshot::channel();
 
-    if let Err(err) = tx.send(Command::Index(index_params)).await {
+    if let Err(err) = tx
+        .send(Command::Index {
+            params: index_params,
+            responder: resp_tx,
+        })
+        .await
+    {
         error!("Error while trying to index data: {}", err);
+        let json = warp::reply::json(&"Internal Server Error".to_string());
+        return Ok(warp::reply::with_status(
+            json,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ));
     }
 
-    let json = warp::reply::json(&"OK");
-    Ok(warp::reply::with_status(json, StatusCode::OK))
+    match resp_rx.await {
+        Ok(result) => match result {
+            Ok(()) => {
+                let json = warp::reply::json(&"OK");
+                Ok(warp::reply::with_status(json, StatusCode::OK))
+            }
+            Err(err) => {
+                let json = warp::reply::json(&format!("{}", err));
+                Ok(warp::reply::with_status(
+                    json,
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                ))
+            }
+        },
+        Err(err) => {
+            error!(
+                "Failed to receive answer from storage layer after save: {}",
+                err
+            );
+            let json = warp::reply::json(&"Internal Server Error".to_string());
+            return Ok(warp::reply::with_status(
+                json,
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    }
 }
 
 async fn web_handler(tx: Sender<Command>) {
@@ -111,16 +134,14 @@ async fn web_handler(tx: Sender<Command>) {
         .and(warp::body::json())
         .and_then(index_handler);
 
-    let endpoints = warp::any().and(
-        root.or(index_data)
-    );
+    let endpoints = warp::any().and(root.or(index_data));
 
     warp::serve(endpoints).run(([127, 0, 0, 1], 3030)).await;
 }
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();    
+    tracing_subscriber::fmt::init();
 
     let (manager_tx, mut rx) = mpsc::channel(8192);
     let web_tx = manager_tx.clone();
@@ -130,9 +151,17 @@ async fn main() {
         while let Some(command) = rx.recv().await {
             println!("Received Index Payload: {:?}", command);
             match command {
-                Command::Index(payload) => {
-                    if let Err(err) = storage_manager.index(payload) {
-                        println!("{}", err);
+                Command::Index { params, responder } => {
+                    if let Err(err) = storage_manager.index(params) {
+                        error!("{}", err);
+                        if let Err(_) = responder.send(Err(err)) {
+                            error!("Error while sending storage response");
+                        }
+                    }
+                    else {
+                        if responder.send(Ok(())).is_err() {
+                            error!("Error while sending storage response");
+                        }
                     }
                 }
             }

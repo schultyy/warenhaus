@@ -15,6 +15,8 @@ pub enum StorageError {
     InvalidFields(Vec<String>),
     #[error("Invalid Data Type. Expected {0}, Got {1}")]
     InvalidDataType(crate::Value, DataType),
+    #[error("Number of fields ({0}) does not match number of provided values ({1}).")]
+    FieldCountMismatch(usize, usize)
 }
 
 #[derive(Debug)]
@@ -30,13 +32,24 @@ impl Storage {
     }
 
     #[instrument]
-    pub fn index(&mut self, params: IndexParams) -> Result<(), StorageError> {
+    fn validate_fields(&self, params: &IndexParams) -> Result<(), StorageError> {
         let column_names = self.columns.iter().map(|c| c.name().to_string()).collect::<Vec<_>>();
         let invalid_fields = params.fields.iter().filter(|f| !column_names.contains(f)).map(|f| f.to_string()).collect::<Vec<_>>();
 
         if invalid_fields.len() > 0 {
             return Err(StorageError::InvalidFields(invalid_fields))
         }
+
+        if params.fields.len() != params.values.len() {
+            return Err(StorageError::FieldCountMismatch(params.fields.len(), params.values.len()))
+        }
+
+        Ok(())
+    }
+
+    #[instrument]
+    pub fn index(&mut self, params: IndexParams) -> Result<(), StorageError> {
+        self.validate_fields(&params)?;
 
         for (index, column_name) in params.fields.iter().enumerate() {
             let column_value = params.values.get(index).unwrap();
