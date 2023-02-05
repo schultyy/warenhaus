@@ -1,14 +1,13 @@
-pub mod data_type;
 pub mod column;
+pub mod data_type;
 
 use thiserror::Error;
-use tracing::{instrument, debug};
+use tracing::{debug, instrument};
 
-use crate::web::Value;
 use crate::web::IndexParams;
+use crate::web::Value;
 
-use self::{data_type::DataType, column::Column};
-
+use self::{column::Column, data_type::DataType};
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -17,7 +16,7 @@ pub enum StorageError {
     #[error("Invalid Data Type. Expected {0}, Got {1}")]
     InvalidDataType(Value, DataType),
     #[error("Number of fields ({0}) does not match number of provided values ({1}).")]
-    FieldCountMismatch(usize, usize)
+    FieldCountMismatch(usize, usize),
 }
 
 #[derive(Debug)]
@@ -28,21 +27,40 @@ pub struct Storage {
 impl Storage {
     pub fn new() -> Self {
         Self {
-            columns: vec![Column::new("url".into(), DataType::String)],
+            columns: vec![
+                Column::new("url".into(), DataType::String),
+                Column::new("timestamp".into(), DataType::Int),
+            ],
         }
     }
 
     #[instrument]
     fn validate_fields(&self, params: &IndexParams) -> Result<(), StorageError> {
-        let column_names = self.columns.iter().map(|c| c.name().to_string()).collect::<Vec<_>>();
-        let invalid_fields = params.fields.iter().filter(|f| !column_names.contains(f)).map(|f| f.to_string()).collect::<Vec<_>>();
+        if self.columns.len() != params.fields.len() {
+            return Err(StorageError::FieldCountMismatch(self.columns.len(), params.fields.len()))
+        }
+
+        let column_names = self
+            .columns
+            .iter()
+            .map(|c| c.name().to_string())
+            .collect::<Vec<_>>();
+        let invalid_fields = params
+            .fields
+            .iter()
+            .filter(|f| !column_names.contains(f))
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>();
 
         if invalid_fields.len() > 0 {
-            return Err(StorageError::InvalidFields(invalid_fields))
+            return Err(StorageError::InvalidFields(invalid_fields));
         }
 
         if params.fields.len() != params.values.len() {
-            return Err(StorageError::FieldCountMismatch(params.fields.len(), params.values.len()))
+            return Err(StorageError::FieldCountMismatch(
+                params.fields.len(),
+                params.values.len(),
+            ));
         }
 
         Ok(())
@@ -54,13 +72,19 @@ impl Storage {
 
         for (index, column_name) in params.fields.iter().enumerate() {
             let column_value = params.values.get(index).unwrap();
-            let column = self.columns.iter_mut().find(|column| &column.name() == column_name).unwrap();
+            let column = self
+                .columns
+                .iter_mut()
+                .find(|column| &column.name() == column_name)
+                .unwrap();
             if column.data_type().is_compatible(column_value) {
                 debug!("Store value {} for column {}", column_value, column_name);
                 column.entries_mut().push(column_value.clone().into());
-            }
-            else {
-                return Err(StorageError::InvalidDataType(column_value.clone(), column.data_type().clone()))
+            } else {
+                return Err(StorageError::InvalidDataType(
+                    column_value.clone(),
+                    column.data_type().clone(),
+                ));
             }
         }
 
