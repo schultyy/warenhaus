@@ -1,6 +1,8 @@
 use std::convert::Infallible;
 use reqwest::StatusCode;
-use storage::{DataType, Cell, Storage};
+use storage::column::Cell;
+use storage::data_type::DataType;
+use storage::Storage;
 use tokio::sync::mpsc::{self, Sender};
 use warp::Filter;
 use serde::{Serialize, Deserialize};
@@ -24,8 +26,8 @@ pub enum Value {
     Boolean(bool)
 }
 
-impl Into<storage::Cell> for Value {
-    fn into(self) -> storage::Cell {
+impl Into<Cell> for Value {
+    fn into(self) -> Cell {
         match self {
             Value::Int(value) => Cell::Int(value),
             Value::Float(value) => Cell::Float(value),
