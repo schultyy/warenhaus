@@ -24,6 +24,41 @@ Once running, gringotts listens on [`http://localhost:3030`](http://localhost:30
 
 Test storing a new record:
 
+```bash
+$ curl -v -XPOST localhost:3030/index -H "Content-Type: application/json" -d '{"fields": ["url", "imestamp"], "values": [{"String": "https://google.com"}, {"Int": 5454353}]}'
 ```
-curl -v -XPOST localhost:3030/index -H "Content-Type: application/json" -d '{"fields": ["url", "imestamp"], "values": [{"String": "https://google.com"}, {"Int": 5454353}]}'
+
+### Database Schema
+
+gringotts reads schema files from `schema.json` in the root directory. 
+
+Example:
+
+```json
+{
+  "columns": [
+    {
+      "name": "Url",
+      "data_type": "String"
+    },
+    {
+      "name": "timestamp",
+      "data_type": "Int"
+    },
+    {
+      "name": "score",
+      "data_type": "Float"
+    }
+  ]
+}
 ```
+
+Available Data Types:
+
+| Type    | Corresponding Rust Type |
+| ------- | ------------------------|
+| Int     | `i64`                   |
+| Float   | `f64`                   |
+| String  | `std::String`           |
+| Boolean | `bool`                  |
+
