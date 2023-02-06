@@ -1,4 +1,4 @@
-use crate::storage::Storage;
+use crate::storage::Container;
 use config::Configurator;
 use tokio::sync::mpsc;
 use tracing::error;
@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
     let configurator = Configurator::new();
     let config = configurator.load()?;
     let url_manager = tokio::spawn(async move {
-        let mut storage_manager = Storage::new(config);
+        let mut storage_manager = Container::new(config);
         while let Some(command) = rx.recv().await {
             println!("Received Index Payload: {:?}", command);
             match command {

@@ -11,7 +11,7 @@ use crate::web::Value;
 use self::{column::Column, data_type::DataType};
 
 #[derive(Debug, Error)]
-pub enum StorageError {
+pub enum ContainerError {
     #[error("Fields are not present in index")]
     InvalidFields(Vec<String>),
     #[error("Invalid Data Type. Expected {0}, Got {1}")]
@@ -21,11 +21,11 @@ pub enum StorageError {
 }
 
 #[derive(Debug)]
-pub struct Storage {
+pub struct Container {
     columns: Vec<Column>,
 }
 
-impl Storage {
+impl Container {
     pub fn new(config: SchemaConfig) -> Self {
 
         let columns = config.columns.into_iter().map(|column_config| column_config.into()).collect::<Vec<Column>>();
@@ -36,9 +36,9 @@ impl Storage {
     }
 
     #[instrument]
-    fn validate_fields(&self, params: &IndexParams) -> Result<(), StorageError> {
+    fn validate_fields(&self, params: &IndexParams) -> Result<(), ContainerError> {
         if self.columns.len() != params.fields.len() {
-            return Err(StorageError::FieldCountMismatch(self.columns.len(), params.fields.len()))
+            return Err(ContainerError::FieldCountMismatch(self.columns.len(), params.fields.len()))
         }
 
         let column_names = self
@@ -54,11 +54,11 @@ impl Storage {
             .collect::<Vec<_>>();
 
         if invalid_fields.len() > 0 {
-            return Err(StorageError::InvalidFields(invalid_fields));
+            return Err(ContainerError::InvalidFields(invalid_fields));
         }
 
         if params.fields.len() != params.values.len() {
-            return Err(StorageError::FieldCountMismatch(
+            return Err(ContainerError::FieldCountMismatch(
                 params.fields.len(),
                 params.values.len(),
             ));
@@ -68,7 +68,7 @@ impl Storage {
     }
 
     #[instrument]
-    pub fn index(&mut self, params: IndexParams) -> Result<(), StorageError> {
+    pub fn index(&mut self, params: IndexParams) -> Result<(), ContainerError> {
         self.validate_fields(&params)?;
 
         for (index, column_name) in params.fields.iter().enumerate() {
@@ -82,7 +82,7 @@ impl Storage {
                 debug!("Store value {} for column {}", column_value, column_name);
                 column.entries_mut().push(column_value.clone().into());
             } else {
-                return Err(StorageError::InvalidDataType(
+                return Err(ContainerError::InvalidDataType(
                     column_value.clone(),
                     column.data_type().clone(),
                 ));

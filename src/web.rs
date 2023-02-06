@@ -2,10 +2,10 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use tracing::error;
 use std::convert::Infallible;
+use crate::storage::ContainerError;
 use crate::storage::column::Cell;
 use crate::storage::data_type::DataType;
 
-use crate::storage::StorageError;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use warp::Filter;
@@ -63,7 +63,7 @@ pub struct IndexParams {
     pub values: Vec<Value>,
 }
 
-type InsertResponder = oneshot::Sender<Result<(), StorageError>>;
+type InsertResponder = oneshot::Sender<Result<(), ContainerError>>;
 
 #[derive(Debug)]
 pub enum Command {
