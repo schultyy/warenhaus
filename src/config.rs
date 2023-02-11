@@ -3,7 +3,7 @@ use std::{fs::File, io::Read, path::Path};
 use serde::Deserialize;
 use tracing::instrument;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub enum DataTypeConfig {
     Int,
     Float,
@@ -16,7 +16,7 @@ pub struct SchemaConfig {
     pub columns: Vec<ColumnConfig>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct ColumnConfig {
     pub name: String,
     pub data_type: DataTypeConfig,

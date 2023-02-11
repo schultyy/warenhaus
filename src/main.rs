@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
     let configurator = Configurator::new();
     let config = configurator.load()?;
     let url_manager = tokio::spawn(async move {
-        let mut storage_manager = Container::new(config);
+        let mut storage_manager = Container::new(config).expect("failed to load container");
         while let Some(command) = rx.recv().await {
             println!("Received Index Payload: {:?}", command);
             match command {

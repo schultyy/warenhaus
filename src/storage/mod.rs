@@ -21,8 +21,8 @@ pub enum ContainerError {
     #[error("IO Error")]
     IoError {
         #[from]
-        source: std::io::Error
-    }
+        source: std::io::Error,
+    },
 }
 
 #[derive(Debug)]
@@ -31,22 +31,23 @@ pub struct Container {
 }
 
 impl Container {
-    pub fn new(config: SchemaConfig) -> Self {
-        let columns = config.columns.into_iter().map(|column_config| {
-            let mut c : Column = column_config.into();
-            c.load().expect("FAiled to load Column");
-            c
-        }).collect::<Vec<Column>>();
-
-        Self {
-            columns
+    pub fn new(config: SchemaConfig) -> Result<Self, ContainerError> {
+        let mut columns = vec![];
+        for column_config in config.columns.iter() {
+            let mut c: Column = column_config.to_owned().into();
+            c.load()?;
+            columns.push(c);
         }
+        Ok(Self { columns })
     }
 
     #[instrument]
     fn validate_fields(&self, params: &IndexParams) -> Result<(), ContainerError> {
         if self.columns.len() != params.fields.len() {
-            return Err(ContainerError::FieldCountMismatch(self.columns.len(), params.fields.len()))
+            return Err(ContainerError::FieldCountMismatch(
+                self.columns.len(),
+                params.fields.len(),
+            ));
         }
 
         let column_names = self
