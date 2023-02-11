@@ -18,6 +18,11 @@ pub enum ContainerError {
     InvalidDataType(Value, DataType),
     #[error("Number of fields ({0}) does not match number of provided values ({1}).")]
     FieldCountMismatch(usize, usize),
+    #[error("IO Error")]
+    IoError {
+        #[from]
+        source: std::io::Error
+    }
 }
 
 #[derive(Debug)]
@@ -27,8 +32,11 @@ pub struct Container {
 
 impl Container {
     pub fn new(config: SchemaConfig) -> Self {
-
-        let columns = config.columns.into_iter().map(|column_config| column_config.into()).collect::<Vec<Column>>();
+        let columns = config.columns.into_iter().map(|column_config| {
+            let mut c : Column = column_config.into();
+            c.load().expect("FAiled to load Column");
+            c
+        }).collect::<Vec<Column>>();
 
         Self {
             columns
@@ -80,7 +88,7 @@ impl Container {
                 .unwrap();
             if column.data_type().is_compatible(column_value) {
                 debug!("Store value {} for column {}", column_value, column_name);
-                column.entries_mut().push(column_value.clone().into());
+                column.insert(column_value.clone().into())?;
             } else {
                 return Err(ContainerError::InvalidDataType(
                     column_value.clone(),
