@@ -31,10 +31,10 @@ pub struct Container {
 }
 
 impl Container {
-    pub fn new(config: SchemaConfig) -> Result<Self, ContainerError> {
+    pub fn new(root_path: &str, config: SchemaConfig) -> Result<Self, ContainerError> {
         let mut columns = vec![];
         for column_config in config.columns.iter() {
-            let mut c: Column = column_config.to_owned().into();
+            let mut c: Column = Column::new(root_path, column_config.name.to_string(), column_config.data_type.to_owned().into());
             c.load()?;
             columns.push(c);
         }

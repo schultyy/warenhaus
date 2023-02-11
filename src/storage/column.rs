@@ -5,12 +5,11 @@ use std::io;
 use std::io::Cursor;
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter, SeekFrom};
+use std::path::Path;
 
 use crc::{CRC_32_CKSUM, Crc};
 
-
 use super::data_type::DataType;
-use crate::config::ColumnConfig;
 
 pub const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_CKSUM);
 const TAG_I64 : u8 = 1;
@@ -101,13 +100,15 @@ pub struct Column {
 }
 
 impl Column {
-    pub fn new(name: String, data_type: DataType) -> Self {
+    pub fn new(root_path: &str, name: String, data_type: DataType) -> Self {
+        let root_path = Path::new(root_path);
+        let file_path = root_path.join(format!("column_{}", name));
         let f = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .append(true)
-            .open(format!("column_{}", name))
+            .open(file_path)
             .unwrap();
 
         Self {
@@ -192,8 +193,3 @@ impl Column {
     }
 }
 
-impl From<ColumnConfig> for Column {
-    fn from(value: ColumnConfig) -> Self {
-        Self::new(value.name, value.data_type.into())
-    }
-}

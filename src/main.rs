@@ -7,6 +7,10 @@ mod storage;
 mod web;
 mod config;
 
+fn database_storage_root_path() -> &'static str {
+    "db"
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>>{
     tracing_subscriber::fmt::init();
@@ -17,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
     let configurator = Configurator::new();
     let config = configurator.load()?;
     let url_manager = tokio::spawn(async move {
-        let mut storage_manager = Container::new(config).expect("failed to load container");
+        let mut storage_manager = Container::new(database_storage_root_path(), config).expect("failed to load container");
         while let Some(command) = rx.recv().await {
             println!("Received Index Payload: {:?}", command);
             match command {
