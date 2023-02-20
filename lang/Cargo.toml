@@ -7,4 +7,6 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.69"
+tempfile = "3.3.0"
+thiserror = "1.0.38"
 wasmtime = "5.0.0"

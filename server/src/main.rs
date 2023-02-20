@@ -1,7 +1,8 @@
 use crate::storage::Container;
 use config::Configurator;
+use lang::CodeRunner;
 use tokio::sync::mpsc;
-use tracing::error;
+use tracing::{error, debug};
 
 mod storage;
 mod web;
@@ -9,6 +10,10 @@ mod config;
 
 fn database_storage_root_path() -> &'static str {
     "db"
+}
+
+fn compiled_map_fn_path() -> &'static str {
+    "queries"
 }
 
 #[tokio::main]
@@ -23,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
     let url_manager = tokio::spawn(async move {
         let mut storage_manager = Container::new(database_storage_root_path(), config).expect("failed to load container");
         while let Some(command) = rx.recv().await {
-            println!("Received Index Payload: {:?}", command);
+            debug!("Received Command: {:?}", command);
             match command {
                 web::Command::Index { params, responder } => {
                     if let Err(err) = storage_manager.index(params) {
@@ -36,6 +41,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                             error!("Error while sending storage response");
                         }
                     }
+                },
+                web::Command::AddMapFn {fn_name, source_code, responder } => {
+                    debug!("Adding new Map Function: {}", fn_name);
+    
+                    let code_runner = CodeRunner::new(compiled_map_fn_path().into()).expect("Failed to instatiate Code pipeline");
+
+                    match code_runner.compile_and_store(&source_code, &fn_name) {
+                        Ok(()) => {
+                            if responder.send(Ok(())).is_err() {
+                                error!("Error while sending wasm response");
+                            }
+                        },
+                        Err(err) => {
+                            if responder.send(Err(err)).is_err() {
+                                error!("Error while sending wasm response");
+                            }
+                        }
+                    }
+
                 }
             }
         }

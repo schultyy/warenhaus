@@ -887,6 +887,8 @@ name = "lang"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "tempfile",
+ "thiserror",
  "wasmtime",
 ]
 
@@ -1984,6 +1986,7 @@ dependencies = [
  "byteorder",
  "crc",
  "futures",
+ "lang",
  "reqwest",
  "serde",
  "serde_json",
