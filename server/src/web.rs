@@ -212,11 +212,31 @@ async fn add_map_function(
                     "Error while trying to compile and save new map function {}: {}",
                     fn_name, err
                 );
-                let json = warp::reply::json(&"Internal Server Error".to_string());
-                return Ok(warp::reply::with_status(
-                    json,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ));
+
+                match err {
+                    WasmError::InvalidCode => {
+                        let json = warp::reply::json(&"Invalid Code".to_string());
+                        return Ok(warp::reply::with_status(
+                            json,
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                        ));
+                    }
+                    WasmError::CompilerError(err) => {
+                        let err_message = format!("Failed to compile code:\n{}", err);
+                        let json = warp::reply::json(&err_message);
+                        return Ok(warp::reply::with_status(
+                            json,
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                        ));
+                    }
+                    _ => {
+                        let json = warp::reply::json(&"Internal Server Error".to_string());
+                        return Ok(warp::reply::with_status(
+                            json,
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                        ));
+                    }
+                }
             }
         },
         Err(err) => {
