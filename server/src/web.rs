@@ -72,8 +72,15 @@ pub struct MapFnParams {
     pub source_code: String,
 }
 
+//#[derive(Debug, Deserialize)]
+//pub struct InvokeMapParams {
+//    //Name of the Map function
+//    pub name: String
+//}
+
 type InsertResponder = oneshot::Sender<Result<(), ContainerError>>;
 type InsertMapFnResponder = oneshot::Sender<Result<(), WasmError>>;
+type ExecuteMapResponder = oneshot::Sender<Result<(), WasmError>>;
 
 #[derive(Debug)]
 pub enum Command {
@@ -85,6 +92,10 @@ pub enum Command {
         fn_name: String,
         source_code: String,
         responder: InsertMapFnResponder,
+    },
+    InvokeMap {
+        fn_name: String,
+        responder: ExecuteMapResponder,
     },
 }
 
@@ -140,8 +151,8 @@ async fn index_handler(
 
 #[tracing::instrument]
 async fn add_map_function(
-    tx: Sender<Command>,
     map_fn_params: MapFnParams,
+    tx: Sender<Command>,
 ) -> Result<impl warp::Reply, Infallible> {
     let (resp_tx, resp_rx) = oneshot::channel();
 
@@ -201,9 +212,37 @@ async fn add_map_function(
     }
 }
 
+async fn execute_map_fn(
+    fn_name: String,
+    tx: Sender<Command>,
+) -> Result<impl warp::Reply, Infallible> {
+    let (resp_tx, resp_rx) = oneshot::channel();
+
+    if let Err(err) = tx
+        .send(Command::InvokeMap {
+            fn_name: fn_name.to_string(),
+            responder: resp_tx,
+        })
+        .await
+    {
+        error!(
+            "Error while trying to add map function {}: {}",
+            fn_name, err
+        );
+        let json = warp::reply::json(&"Internal Server Error".to_string());
+        return Ok(warp::reply::with_status(
+            json,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ));
+    } else {
+        let json = warp::reply::json(&"Ok".to_string());
+        return Ok(warp::reply::with_status(json, StatusCode::OK));
+    }
+}
+
 pub async fn web_handler(tx: Sender<Command>) {
     let root = warp::path::end().map(|| "root");
-
+    let log = warp::log("warenhaus");
     let index_data = warp::path!("index")
         .and(with_tx(tx.clone()))
         .and(warp::post())
@@ -211,12 +250,23 @@ pub async fn web_handler(tx: Sender<Command>) {
         .and_then(index_handler);
 
     let add_map_fn = warp::path!("add_map")
+        .and(warp::body::json())
         .and(with_tx(tx.clone()))
         .and(warp::post())
-        .and(warp::body::json())
         .and_then(add_map_function);
 
-    let endpoints = warp::any().and(root.or(index_data).or(add_map_fn));
+    let execute_map_fn_handler = warp::path!("query" / String)
+        .and(warp::get())
+        .and(with_tx(tx.clone()))
+        .and_then(execute_map_fn);
+
+    let endpoints = warp::any()
+        .and(
+            root.or(add_map_fn)
+                .or(index_data)
+                .or(execute_map_fn_handler),
+        )
+        .with(log);
 
     warp::serve(endpoints).run(([127, 0, 0, 1], 3030)).await;
 }

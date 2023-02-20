@@ -1,4 +1,5 @@
-use std::{io::Write, path::Path, fs::File};
+use std::{fs::File, io::Write, path::Path};
+use tracing::debug;
 
 use anyhow::Result;
 use thiserror::Error;
@@ -15,10 +16,11 @@ pub enum WasmError {
     #[error("IO Error")]
     Io {
         #[from]
-        source: std::io::Error
-    }
+        source: std::io::Error,
+    },
 }
 
+#[derive(Debug)]
 pub struct CodeRunner {
     compiled_query_storage_path: String,
     asm_script_compiler_path: String,
@@ -44,16 +46,41 @@ impl CodeRunner {
         let compiler = AssemblyScriptCompiler::new(self.asm_script_compiler_path.to_string());
         let compiled_wat = match compiler.compile_to_wat(&asm_script_code) {
             Ok(compiled) => compiled,
-            Err(_err) => return Err(WasmError::CompilerError)
+            Err(_err) => return Err(WasmError::CompilerError),
         };
 
         let mut compiled_file_path = Path::new(&self.compiled_query_storage_path).join(name);
         // compiled_file_path
         //     .set_file_name(name);
-        compiled_file_path
-            .set_extension("wat");
+        compiled_file_path.set_extension("wat");
         let mut file = File::create(compiled_file_path)?;
         file.write_all(compiled_wat.as_bytes())?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument]
+    pub fn execute_map(&self, function_name: &str) -> Result<()> {
+
+        let base_path = Path::new(&self.compiled_query_storage_path);
+        let filename = base_path.join(format!("{}.wat", function_name));
+
+        debug!("Loading wasm file {:?}", filename);
+        let engine = Engine::default();
+        // let module = Module
+        let module = Module::from_file(&engine, filename)?;
+        let mut store = Store::new(&engine, ());
+
+        let log_func = Func::wrap(&mut store, |_caller: Caller<'_, ()>| {
+            println!("Logging");
+        });
+
+        let imports = [log_func.into()];
+        let instance = Instance::new(&mut store, &module, &imports)?;
+
+        let run = instance.get_typed_func::<(), ()>(&mut store, "run")?;
+
+        run.call(&mut store, ())?;
 
         Ok(())
     }
@@ -64,10 +91,13 @@ pub struct AssemblyScriptCompiler {
 }
 
 impl AssemblyScriptCompiler {
-    pub fn new(asm_script_compiler_path: String) -> Self { Self { asm_script_compiler_path } }
+    pub fn new(asm_script_compiler_path: String) -> Self {
+        Self {
+            asm_script_compiler_path,
+        }
+    }
 
     pub fn compile_to_wat(&self, code: &str) -> Result<String, std::io::Error> {
-        
         let mut temp_file = tempfile::Builder::new()
             .prefix("assemblyscript")
             .suffix(".ts")
@@ -85,42 +115,3 @@ impl AssemblyScriptCompiler {
     }
 }
 
-
-fn execute_map(code: &str) -> Result<()> {
-    let engine = Engine::default();
-    // let module = Module
-    let module = Module::new(&engine, code)?;
-    let mut store = Store::new(&engine, ());
-
-    let log_func = Func::wrap(&mut store, |_caller: Caller<'_, ()>| {
-        println!("Logging");
-    });
-
-    let imports = [log_func.into()];
-    let instance = Instance::new(&mut store, &module, &imports)?;
-
-    let run = instance.get_typed_func::<(), ()>(&mut store, "run")?;
-
-    run.call(&mut store, ())?;
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let wat = r#"
-            (module
-                (func $log (import "" "log"))
-
-                (func (export "run")
-                    call $log)
-            )
-        "#;
-        let result = execute_map(wat);
-        assert!(result.is_ok());
-    }
-}

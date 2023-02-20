@@ -59,7 +59,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                             }
                         }
                     }
-
+                },
+                web::Command::InvokeMap { fn_name, responder } => {
+                    debug!("Execute Map function: {}", fn_name);
+                    let code_runner = CodeRunner::new(compiled_map_fn_path().into()).expect("Failed to instatiate Code pipeline");
+                    match code_runner.execute_map(&fn_name) {
+                        Ok(()) => {
+                            responder.send(Ok(()));
+                        },
+                        Err(err) => {
+                            error!("Error trying to run code {}: {}", fn_name, err);
+                            responder.send(Err(lang::WasmError::InvalidCode));
+                        }
+                    }
                 }
             }
         }
