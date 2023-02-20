@@ -1985,6 +1985,7 @@ name = "warenhaus"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "bytes",
  "crc",
  "futures",
  "lang",

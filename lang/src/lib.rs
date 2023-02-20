@@ -50,8 +50,6 @@ impl CodeRunner {
         };
 
         let mut compiled_file_path = Path::new(&self.compiled_query_storage_path).join(name);
-        // compiled_file_path
-        //     .set_file_name(name);
         compiled_file_path.set_extension("wat");
         let mut file = File::create(compiled_file_path)?;
         file.write_all(compiled_wat.as_bytes())?;

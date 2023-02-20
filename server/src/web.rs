@@ -1,15 +1,18 @@
 use crate::storage::column::Cell;
 use crate::storage::data_type::DataType;
 use crate::storage::ContainerError;
+use bytes::BufMut;
+use futures::TryStreamExt;
 use lang::WasmError;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use std::convert::Infallible;
 use tracing::error;
+use warp::multipart::{FormData, Part};
 
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
-use warp::Filter;
+use warp::{Filter, Rejection};
 
 fn with_tx(
     tx: Sender<Command>,
@@ -71,12 +74,6 @@ pub struct MapFnParams {
     ///AssemblyScript Source Code
     pub source_code: String,
 }
-
-//#[derive(Debug, Deserialize)]
-//pub struct InvokeMapParams {
-//    //Name of the Map function
-//    pub name: String
-//}
 
 type InsertResponder = oneshot::Sender<Result<(), ContainerError>>;
 type InsertMapFnResponder = oneshot::Sender<Result<(), WasmError>>;
@@ -151,22 +148,51 @@ async fn index_handler(
 
 #[tracing::instrument]
 async fn add_map_function(
-    map_fn_params: MapFnParams,
+    fn_name: String,
+    form: FormData,
     tx: Sender<Command>,
-) -> Result<impl warp::Reply, Infallible> {
+) -> Result<impl warp::Reply, Rejection> {
     let (resp_tx, resp_rx) = oneshot::channel();
+
+    let parts: Vec<Part> = form.try_collect().await.map_err(|e| {
+        error!("form error: {}", e);
+        warp::reject::reject()
+    })?;
+
+    let file_part = parts.into_iter().find(|p| p.name() == "data").unwrap();
+
+    let content_type = file_part.content_type().unwrap_or("N/A");
+
+    if content_type != "application/octet-stream" {
+        error!("invalid file type found: {}", content_type);
+        return Err(warp::reject::reject());
+    }
+
+    let value = file_part
+        .stream()
+        .try_fold(Vec::new(), |mut vec, data| {
+            vec.put(data);
+            async move { Ok(vec) }
+        })
+        .await
+        .map_err(|e| {
+            error!("reading file error: {}", e);
+            warp::reject::reject()
+        })?;
+
+    let file_content = String::from_utf8_lossy(&value);
 
     if let Err(err) = tx
         .send(Command::AddMapFn {
-            fn_name: map_fn_params.name.to_string(),
-            source_code: map_fn_params.source_code.to_string(),
+            fn_name: fn_name.to_string(),
+            source_code: file_content.to_string(),
             responder: resp_tx,
         })
         .await
     {
         error!(
             "Error while trying to add map function {}: {}",
-            map_fn_params.name, err
+            fn_name, err
         );
         let json = warp::reply::json(&"Internal Server Error".to_string());
         return Ok(warp::reply::with_status(
@@ -176,34 +202,29 @@ async fn add_map_function(
     }
 
     match resp_rx.await {
-        Ok(code_result) => match code_result {
+        Ok(add_map_fn_result) => match add_map_fn_result {
             Ok(()) => {
-                let json = warp::reply::json(&"ok");
-                Ok(warp::reply::with_status(json, StatusCode::OK))
+                let json = warp::reply::json(&"Created");
+                Ok(warp::reply::with_status(json, StatusCode::CREATED))
             }
             Err(err) => {
-                error!("Tried to save and compile code. Received {}", err);
-                if let WasmError::CompilerNotFound = err {
-                    let json = warp::reply::json(&"Internal Server Error");
-                    Ok(warp::reply::with_status(
-                        json,
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ))
-                } else {
-                    let json = warp::reply::json(&format!("{}", err));
-                    Ok(warp::reply::with_status(
-                        json,
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                    ))
-                }
+                error!(
+                    "Error while trying to compile and save new map function {}: {}",
+                    fn_name, err
+                );
+                let json = warp::reply::json(&"Internal Server Error".to_string());
+                return Ok(warp::reply::with_status(
+                    json,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
             }
         },
         Err(err) => {
             error!(
-                "Failed to receive answer from storage layer after save: {}",
-                err
+                "Error while trying to receive map function result {}: {}",
+                fn_name, err
             );
-            let json = warp::reply::json(&"internal server error".to_string());
+            let json = warp::reply::json(&"Internal Server Error".to_string());
             return Ok(warp::reply::with_status(
                 json,
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -249,8 +270,8 @@ pub async fn web_handler(tx: Sender<Command>) {
         .and(warp::body::json())
         .and_then(index_handler);
 
-    let add_map_fn = warp::path!("add_map")
-        .and(warp::body::json())
+    let add_map_fn = warp::path!("add_map" / String)
+        .and(warp::multipart::form().max_length(5_000_000))
         .and(with_tx(tx.clone()))
         .and(warp::post())
         .and_then(add_map_function);
