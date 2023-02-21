@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, path::Path};
+use std::io::Write;
 use tracing::{error, info};
 
 use thiserror::Error;

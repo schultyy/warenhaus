@@ -4,7 +4,9 @@ use tracing::{error, debug};
 use wasmtime::*;
 use anyhow::Result;
 
-use crate::{wasm_error::WasmError, AssemblyScriptCompiler};
+use crate::query::AssemblyScriptCompiler;
+
+use super::wasm_error::WasmError;
 
 #[derive(Debug)]
 pub struct CodeRunner {

@@ -1,12 +1,13 @@
-use crate::storage::Container;
+use crate::{storage::Container, query::{code_runner::CodeRunner, wasm_error::WasmError}};
 use config::Configurator;
-use lang::{code_runner::CodeRunner, wasm_error::WasmError};
+
 use tokio::sync::mpsc;
 use tracing::{error, debug};
 
 mod storage;
 mod web;
 mod config;
+mod query;
 
 fn database_storage_root_path() -> &'static str {
     "db"

@@ -1,9 +1,8 @@
-use crate::storage::column::Cell;
+use crate::{storage::column::Cell, query::wasm_error::WasmError};
 use crate::storage::data_type::DataType;
 use crate::storage::ContainerError;
 use bytes::BufMut;
 use futures::TryStreamExt;
-use lang::wasm_error::WasmError;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use std::convert::Infallible;
