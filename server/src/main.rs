@@ -1,6 +1,6 @@
 use crate::storage::Container;
 use config::Configurator;
-use lang::CodeRunner;
+use lang::{code_runner::CodeRunner, wasm_error::WasmError};
 use tokio::sync::mpsc;
 use tracing::{error, debug};
 
@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                         },
                         Err(err) => {
                             error!("Error trying to run code {}: {}", fn_name, err);
-                            responder.send(Err(lang::WasmError::InvalidCode));
+                            responder.send(Err(WasmError::InvalidCode));
                         }
                     }
                 }

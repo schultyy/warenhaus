@@ -3,7 +3,7 @@ use crate::storage::data_type::DataType;
 use crate::storage::ContainerError;
 use bytes::BufMut;
 use futures::TryStreamExt;
-use lang::WasmError;
+use lang::wasm_error::WasmError;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use std::convert::Infallible;
@@ -253,6 +253,7 @@ async fn add_map_function(
     }
 }
 
+#[tracing::instrument]
 async fn execute_map_fn(
     fn_name: String,
     tx: Sender<Command>,
@@ -275,12 +276,35 @@ async fn execute_map_fn(
             json,
             StatusCode::INTERNAL_SERVER_ERROR,
         ));
-    } else {
-        let json = warp::reply::json(&"Ok".to_string());
-        return Ok(warp::reply::with_status(json, StatusCode::OK));
+    }
+
+    match resp_rx.await {
+        Ok(execution_result) => match execution_result {
+            Ok(()) => {
+                let json = warp::reply::json(&"Ok".to_string());
+                return Ok(warp::reply::with_status(json, StatusCode::OK));
+            }
+            Err(wasm_err) => {
+                error!("Failed to execute query: {}", wasm_err);
+                let json = warp::reply::json(&"Internal Server Error".to_string());
+                return Ok(warp::reply::with_status(
+                    json,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+            }
+        },
+        Err(recv_err) => {
+            error!("Failed to receive execution result: {}", recv_err);
+            let json = warp::reply::json(&"Internal Server Error".to_string());
+            return Ok(warp::reply::with_status(
+                json,
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
     }
 }
 
+#[tracing::instrument]
 pub async fn web_handler(tx: Sender<Command>) {
     let root = warp::path::end().map(|| "root");
     let log = warp::log("warenhaus");
