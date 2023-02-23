@@ -1,4 +1,4 @@
-use crate::{storage::Container, query::{code_runner::CodeRunner, wasm_error::WasmError}};
+use crate::{storage::Container, query::code_runner::CodeRunner, command::Command};
 use config::Configurator;
 
 use tokio::sync::mpsc;
@@ -8,6 +8,7 @@ mod storage;
 mod web;
 mod config;
 mod query;
+mod command;
 
 fn database_storage_root_path() -> &'static str {
     "db"
@@ -23,6 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
     let (manager_tx, mut rx) = mpsc::channel(8192);
     let web_tx = manager_tx.clone();
+    let code_runner_tx = manager_tx.clone();
     let mut all_workers = vec![];
     let configurator = Configurator::new();
     let config = configurator.load()?;
@@ -31,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
         while let Some(command) = rx.recv().await {
             debug!("Received Command: {:?}", command);
             match command {
-                web::Command::Index { params, responder } => {
+                Command::Index { params, responder } => {
                     if let Err(err) = storage_manager.index(params) {
                         error!("{}", err);
                         if let Err(_) = responder.send(Err(err)) {
@@ -43,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                         }
                     }
                 },
-                web::Command::AddMapFn {fn_name, source_code, responder } => {
+                Command::AddMapFn {fn_name, source_code, responder } => {
                     debug!("Adding new Map Function: {}", fn_name);
     
                     let code_runner = CodeRunner::new(compiled_map_fn_path().into()).expect("Failed to instatiate Code pipeline");
@@ -61,19 +63,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                         }
                     }
                 },
-                web::Command::InvokeMap { fn_name, responder } => {
+                Command::InvokeMap { fn_name, responder } => {
                     debug!("Execute Map function: {}", fn_name);
+                    let fn_name = fn_name.clone();
+
                     let code_runner = CodeRunner::new(compiled_map_fn_path().into()).expect("Failed to instatiate Code pipeline");
-                    match code_runner.execute_map(&fn_name) {
-                        Ok(()) => {
-                            responder.send(Ok(()));
-                        },
-                        Err(err) => {
-                            error!("Error trying to run code {}: {}", fn_name, err);
-                            responder.send(Err(WasmError::InvalidCode));
+
+                    //storage_manager -> code_runner
+                    //storage_manager calls code runner for each row
+                    let (tx, mut rx) = mpsc::channel(8);
+
+                    storage_manager.query(tx).await;
+
+                    let mut rows = vec!();
+
+                    while let Some(payload) = rx.recv().await {
+                        match payload {
+                            Command::QueryRow { row } => {
+                                debug!("Running Code for {:?}", row);
+                                match code_runner.execute_map(&fn_name, row.clone()) {
+                                    Ok(result) => if result != 0 {
+                                        rows.push(row);
+                                    },
+                                    Err(err) => {
+                                        error!("Error while trying to index row: {}", err);
+                                    }
+                                }
+                            },
+                            Command::EndOfQuery => break,
+                            _ => {
+                                panic!("Unexpected Code Reached");
+                            }
                         }
                     }
-                }
+                    responder.send(Ok(rows));
+                },
+                Command::EndOfQuery => panic!("Unexpected Code Reached: Command::EndOfQuery"),
+                Command::QueryRow { row: _row } => panic!("Unexpected Code Reached: Command::QueryRow"),
             }
         }
     });

@@ -1,4 +1,5 @@
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use serde::Serialize;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
@@ -17,7 +18,7 @@ const TAG_F64 : u8 = 2;
 const TAG_STR : u8 = 3;
 const TAG_BOOL : u8 = 4;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
 pub enum Cell {
     Int(i64),
     Float(f64),
@@ -190,6 +191,10 @@ impl Column {
         }
 
         Ok(Cell::from_bytes(tag_byte, data).unwrap())
+    }
+
+    pub fn entries(&self) -> &[Cell] {
+        self.entries.as_ref()
     }
 }
 

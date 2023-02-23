@@ -2,12 +2,15 @@ pub mod column;
 pub mod data_type;
 
 use thiserror::Error;
+use tokio::sync::mpsc::Sender;
 use tracing::{debug, instrument};
 
+use crate::command::Command;
 use crate::config::SchemaConfig;
 use crate::web::IndexParams;
 use crate::web::Value;
 
+use self::column::Cell;
 use self::{column::Column, data_type::DataType};
 
 #[derive(Debug, Error)]
@@ -99,5 +102,17 @@ impl Container {
         }
 
         Ok(())
+    }
+
+    pub async fn query(&self, tx: Sender<Command>) {
+        let num_rows = self.columns[0].entries().len();
+        for n in 0..num_rows {
+            let mut row = vec!();
+            for column in &self.columns {
+                let cell = column.entries().get(n).unwrap();
+                row.push(cell.clone());
+            }
+            tx.send(Command::QueryRow { row }).await;
+        }
     }
 }

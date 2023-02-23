@@ -1,16 +1,16 @@
+use crate::command::Command;
 use crate::{storage::column::Cell, query::wasm_error::WasmError};
 use crate::storage::data_type::DataType;
-use crate::storage::ContainerError;
 use bytes::BufMut;
 use futures::TryStreamExt;
 use reqwest::StatusCode;
 use serde::Deserialize;
+use tokio::sync::oneshot;
 use std::convert::Infallible;
 use tracing::error;
 use warp::multipart::{FormData, Part};
 
 use tokio::sync::mpsc::Sender;
-use tokio::sync::oneshot;
 use warp::{Filter, Rejection};
 
 fn with_tx(
@@ -72,27 +72,6 @@ pub struct MapFnParams {
     pub name: String,
     ///AssemblyScript Source Code
     pub source_code: String,
-}
-
-type InsertResponder = oneshot::Sender<Result<(), ContainerError>>;
-type InsertMapFnResponder = oneshot::Sender<Result<(), WasmError>>;
-type ExecuteMapResponder = oneshot::Sender<Result<(), WasmError>>;
-
-#[derive(Debug)]
-pub enum Command {
-    Index {
-        params: IndexParams,
-        responder: InsertResponder,
-    },
-    AddMapFn {
-        fn_name: String,
-        source_code: String,
-        responder: InsertMapFnResponder,
-    },
-    InvokeMap {
-        fn_name: String,
-        responder: ExecuteMapResponder,
-    },
 }
 
 #[tracing::instrument]
@@ -279,8 +258,8 @@ async fn execute_map_fn(
 
     match resp_rx.await {
         Ok(execution_result) => match execution_result {
-            Ok(()) => {
-                let json = warp::reply::json(&"Ok".to_string());
+            Ok(rows) => {
+                let json = warp::reply::json(&rows);
                 return Ok(warp::reply::with_status(json, StatusCode::OK));
             }
             Err(wasm_err) => {
