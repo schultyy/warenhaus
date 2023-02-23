@@ -68,8 +68,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
                     let code_runner = CodeRunner::new(compiled_map_fn_path().into()).expect("Failed to instatiate Code pipeline");
 
-                    //storage_manager -> code_runner
-                    //storage_manager calls code runner for each row
                     let (tx, mut rx) = mpsc::channel(8);
 
                     storage_manager.query(tx).await;
@@ -91,13 +89,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                                     }
                                 }
                             },
-                            Command::EndOfQuery => break,
+                            Command::EndOfQuery => {
+                                debug!("Received End of Query");
+                                break
+                            },
                             _ => {
                                 panic!("Unexpected Code Reached");
                             }
                         }
                     }
-                    responder.send(Ok(rows));
+                    match responder.send(Ok(rows)) {
+                        Ok(()) => {},
+                        Err(err) => {
+                            error!("Failed to send rows: {:?}", err);
+                        }
+                    }
                 },
                 Command::EndOfQuery => panic!("Unexpected Code Reached: Command::EndOfQuery"),
                 Command::QueryRow { row: _row } => panic!("Unexpected Code Reached: Command::QueryRow"),
