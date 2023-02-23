@@ -24,7 +24,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
     let (manager_tx, mut rx) = mpsc::channel(8192);
     let web_tx = manager_tx.clone();
-    let code_runner_tx = manager_tx.clone();
     let mut all_workers = vec![];
     let configurator = Configurator::new();
     let config = configurator.load()?;
@@ -74,10 +73,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                     let (tx, mut rx) = mpsc::channel(8);
 
                     storage_manager.query(tx).await;
+                    debug!("Queried Storage Manager");
 
                     let mut rows = vec!();
 
                     while let Some(payload) = rx.recv().await {
+                        debug!("Received Storage Manager Callback");
                         match payload {
                             Command::QueryRow { row } => {
                                 debug!("Running Code for {:?}", row);

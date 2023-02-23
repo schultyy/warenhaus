@@ -3,6 +3,7 @@ pub mod data_type;
 
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
+use tracing::error;
 use tracing::{debug, instrument};
 
 use crate::command::Command;
@@ -10,7 +11,6 @@ use crate::config::SchemaConfig;
 use crate::web::IndexParams;
 use crate::web::Value;
 
-use self::column::Cell;
 use self::{column::Column, data_type::DataType};
 
 #[derive(Debug, Error)]
@@ -112,7 +112,12 @@ impl Container {
                 let cell = column.entries().get(n).unwrap();
                 row.push(cell.clone());
             }
-            tx.send(Command::QueryRow { row }).await;
+            match tx.send(Command::QueryRow { row }).await {
+                Ok(()) => {},
+                Err(err) => {
+                    error!("SendError: {}", err);
+                }
+            }
         }
     }
 }

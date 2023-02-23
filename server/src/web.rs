@@ -246,7 +246,7 @@ async fn execute_map_fn(
         .await
     {
         error!(
-            "Error while trying to add map function {}: {}",
+            "Error while trying to execute map function {}: {}",
             fn_name, err
         );
         let json = warp::reply::json(&"Internal Server Error".to_string());
