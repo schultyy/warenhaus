@@ -32,7 +32,7 @@ Also, we rely on the AssemblyScript compiler to be present on the machine. We pr
 ### Test storing a new record:
 
 ```bash
-$ curl -v -XPOST localhost:3030/index -H "Content-Type: application/json" -d '{"fields": ["url", "imestamp"], "values": [{"String": "https://google.com"}, {"Int": 5454353}]}'
+$ curl -v -XPOST localhost:3030/index -H "Content-Type: application/json" -d '{"fields": ["url", "imestamp"], "values": ["https://google.com", 5454353]}'
 ```
 
 ### Querying Data

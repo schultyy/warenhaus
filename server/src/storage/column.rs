@@ -29,6 +29,25 @@ pub enum Cell {
 
 
 impl Cell {
+    pub fn from_json_value(json_value: &serde_json::Value) -> Option<Self> {
+        match json_value {
+            serde_json::Value::Null => None,
+            serde_json::Value::Bool(bool) => Some(Cell::Boolean(bool.to_owned())),
+            serde_json::Value::Number(num) => {
+                if num.is_i64() || num.is_u64() {
+                    Some(Cell::Int(num.as_i64().unwrap()))
+                }
+                else {
+                    Some(Cell::Float(num.as_f64().unwrap()))
+                }
+            },
+            serde_json::Value::String(str) => Some(Cell::String(str.into())),
+            serde_json::Value::Array(_) => None,
+            serde_json::Value::Object(_) => None,
+        }
+    }
+
+
     pub fn to_bytes(&self) -> Result<(u32, u8, ByteString), std::io::Error> {
         let (tag_byte, value) = match self {
             Cell::Int(val) => {

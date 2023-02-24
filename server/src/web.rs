@@ -19,51 +19,10 @@ fn with_tx(
     warp::any().map(move || tx.clone())
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub enum Value {
-    Int(i64),
-    Float(f64),
-    String(String),
-    Boolean(bool),
-}
-
-impl Into<Cell> for Value {
-    fn into(self) -> Cell {
-        match self {
-            Value::Int(value) => Cell::Int(value),
-            Value::Float(value) => Cell::Float(value),
-            Value::String(value) => Cell::String(value),
-            Value::Boolean(value) => Cell::Boolean(value),
-        }
-    }
-}
-
-impl std::fmt::Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Value::Int(val) => write!(f, "i64 {}", val),
-            Value::Float(val) => write!(f, "f64 {}", val),
-            Value::String(val) => write!(f, "Str {}", val),
-            Value::Boolean(val) => write!(f, "bool {}", val),
-        }
-    }
-}
-
-impl Into<DataType> for &Value {
-    fn into(self) -> DataType {
-        match self {
-            Value::Int(_) => DataType::Int,
-            Value::Float(_) => DataType::Float,
-            Value::String(_) => DataType::String,
-            Value::Boolean(_) => DataType::Boolean,
-        }
-    }
-}
-
 #[derive(Debug, Deserialize)]
 pub struct IndexParams {
     pub fields: Vec<String>,
-    pub values: Vec<Value>,
+    pub values: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]

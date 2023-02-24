@@ -8,8 +8,8 @@ use tracing::{debug, instrument};
 
 use crate::command::Command;
 use crate::config::SchemaConfig;
+use crate::storage::column::Cell;
 use crate::web::IndexParams;
-use crate::web::Value;
 
 use self::{column::Column, data_type::DataType};
 
@@ -18,7 +18,7 @@ pub enum ContainerError {
     #[error("Fields are not present in index")]
     InvalidFields(Vec<String>),
     #[error("Invalid Data Type. Expected {0}, Got {1}")]
-    InvalidDataType(Value, DataType),
+    InvalidDataType(serde_json::Value, DataType),
     #[error("Number of fields ({0}) does not match number of provided values ({1}).")]
     FieldCountMismatch(usize, usize),
     #[error("IO Error")]
@@ -92,7 +92,12 @@ impl Container {
                 .unwrap();
             if column.data_type().is_compatible(column_value) {
                 debug!("Store value {} for column {}", column_value, column_name);
-                column.insert(column_value.clone().into())?;
+                if let Some(cell) = Cell::from_json_value(column_value) {
+                    column.insert(cell)?;
+                }
+                else {
+                    error!("Incompatible data type for cell: {:?}", column_value);
+                }
             } else {
                 return Err(ContainerError::InvalidDataType(
                     column_value.clone(),
