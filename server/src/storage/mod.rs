@@ -18,7 +18,7 @@ use self::{column::Column, data_type::DataType};
 pub enum ContainerError {
     #[error("Fields are not present in index")]
     InvalidFields(Vec<String>),
-    #[error("Invalid Data Type. Expected {0}, Got {1}")]
+    #[error("Invalid Data Type. Expected {1}, Got {0}")]
     InvalidDataType(serde_json::Value, DataType),
     #[error("Number of fields ({0}) does not match number of provided values ({1}).")]
     FieldCountMismatch(usize, usize),
@@ -55,7 +55,7 @@ impl Container {
         Ok(Self { columns, config })
     }
 
-    #[instrument]
+    #[instrument(skip(self))]
     fn validate_fields(&self, params: &IndexParams) -> Result<(), ContainerError> {
         let param_field_count = if self.config.add_timestamp_column {
             debug!("Validate Param Field Count. Adding Timestamp Column");
@@ -97,21 +97,23 @@ impl Container {
         Ok(())
     }
 
-    #[instrument]
+    #[instrument(skip(self))]
     pub fn index(&mut self, params: IndexParams) -> Result<(), ContainerError> {
         self.validate_fields(&params)?;
+
+        let mut to_be_inserted = vec!();
 
         if self.config.add_timestamp_column {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis();
-            if let Some(timestamp_column) = self
+            if let Some(_timestamp_column) = self
                 .columns
-                .iter_mut()
+                .iter()
                 .find(|column| column.name() == "timestamp")
             {
-                timestamp_column.insert(Cell::UInt(timestamp))?;
+                to_be_inserted.push(("timestamp".to_string(), Cell::UInt(timestamp)));
             } else {
                 error!(
                     "Failed to insert timestamp for {:?} params. Couldn't find Column",
@@ -125,13 +127,13 @@ impl Container {
             let column_value = params.values.get(index).unwrap();
             let db_column = self
                 .columns
-                .iter_mut()
+                .iter()
                 .find(|column| &column.name() == column_name)
                 .unwrap();
             if db_column.data_type().is_compatible(column_value) {
                 debug!("Store value {} for column {}", column_value, column_name);
                 if let Some(cell) = Cell::from_json_value(column_value) {
-                    db_column.insert(cell)?;
+                    to_be_inserted.push((column_name.to_owned(), cell));
                 } else {
                     error!("Incompatible data type for cell: {:?}", column_value);
                 }
@@ -143,14 +145,32 @@ impl Container {
             }
         }
 
+        //COMMIT
+        self.commit(to_be_inserted)?;
         Ok(())
     }
 
+    #[instrument(skip(self))]
+    fn commit(&mut self, values: Vec<(String, Cell)>) -> Result<(), ContainerError> {
+        for (column_name, cell) in values {
+            let db_column = self
+                .columns
+                .iter_mut()
+                .find(|column| column.name() == column_name)
+                .unwrap();
+            db_column.insert(cell)?;
+        }
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
     pub async fn query(&self, tx: Sender<Command>) {
         let num_rows = self.columns[0].entries().len();
         for n in 0..num_rows {
             let mut row = vec![];
             for column in &self.columns {
+                println!("n {} | num_rows: {}", n, num_rows);
+                println!("column.entries len: {}", column.entries().len());
                 let cell = column.entries().get(n).unwrap();
                 row.push(cell.clone());
             }
@@ -206,6 +226,23 @@ mod tests {
         SchemaConfig {
             columns,
             add_timestamp_column: false,
+        }
+    }
+
+    fn schema_config_with_timestamp_and_two_columns() -> SchemaConfig {
+        let columns = vec![
+            ColumnConfig {
+                name: "url".into(),
+                data_type: DataTypeConfig::String,
+            },
+            ColumnConfig {
+                name: "points".into(),
+                data_type: DataTypeConfig::Int,
+            }
+        ];
+        SchemaConfig {
+            columns,
+            add_timestamp_column: true,
         }
     }
 
@@ -319,5 +356,39 @@ mod tests {
             .find(|c| c.name() == "url")
             .unwrap();
         assert_eq!(url_column.entries().len(), 0, "was expecting no url, found: {:?}", url_column.entries());
+    }
+
+    #[test]
+    fn reject_insert_for_all_cells_when_one_cell_fails() {
+        initialize();
+        let mut container = Container::new("/tmp".into(), schema_config_with_timestamp_and_two_columns()).unwrap();
+        let params = IndexParams {
+            fields: vec!["url".into(), "points".into()],
+            values: vec!["https://google.com".into(), serde_json::Value::Null],
+        };
+
+        let result = container.index(params);
+        assert!(result.is_err(), "Was expecting error on insert. Got {:?}", result);
+
+        let url_column = container
+            .columns
+            .iter()
+            .find(|c| c.name() == "url")
+            .unwrap();
+        assert_eq!(url_column.entries().len(), 0, "was expecting no url, found: {:?}", url_column.entries());
+
+        let points_column = container
+            .columns
+            .iter()
+            .find(|c| c.name() == "points")
+            .unwrap();
+        assert_eq!(points_column.entries().len(), 0, "was expecting no points, found: {:?}", points_column.entries());
+
+        let timestamp_column = container
+            .columns
+            .iter()
+            .find(|c| c.name() == "timestamp")
+            .unwrap();
+        assert_eq!(timestamp_column.entries().len(), 0, "was expecting no timestamp, found: {:?}", timestamp_column.entries());
     }
 }
