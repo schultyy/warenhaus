@@ -973,8 +973,12 @@ dependencies = [
 name = "kafka_client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "kafka",
+ "reqwest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -122,3 +122,36 @@ Available Data Types:
 | String  | `std::String`           |
 | Boolean | `bool`                  |
 
+### Kafka Client
+
+The Kafka Client consumes a given Kafka topic and inserts records into the database. 
+
+Before running the client, create a new `mapping.json`:
+
+```json
+[
+  {
+    "kafka_field": "title",
+    "database_field": "title",
+    "database_type": "String"
+  },
+  {
+    "kafka_field": "url",
+    "database_field": "url",
+    "database_type": "String"
+  },
+  {
+    "kafka_field": "points",
+    "database_field": "points",
+    "database_type": "Int"
+  }
+]
+```
+
+This file maps a Kafka field to the corresponding database field, including its data type.
+
+Once created, run the client like this:
+
+```
+$ cargo run -p kafka_client -- --kafka-topic docker --mapping-file-path mapping.json
+```
