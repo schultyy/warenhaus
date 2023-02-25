@@ -1,6 +1,7 @@
 pub mod column;
 pub mod data_type;
 
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 use tracing::error;
@@ -26,10 +27,13 @@ pub enum ContainerError {
         #[from]
         source: std::io::Error,
     },
+    #[error("Missing Timestamp Column")]
+    MissingTimestampColumn,
 }
 
 #[derive(Debug)]
 pub struct Container {
+    config: SchemaConfig,
     columns: Vec<Column>,
 }
 
@@ -37,16 +41,30 @@ impl Container {
     pub fn new(root_path: &str, config: SchemaConfig) -> Result<Self, ContainerError> {
         let mut columns = vec![];
         for column_config in config.columns.iter() {
-            let mut c: Column = Column::new(root_path, column_config.name.to_string(), column_config.data_type.to_owned().into());
+            let mut c: Column = Column::new(
+                root_path,
+                column_config.name.to_string(),
+                column_config.data_type.to_owned().into(),
+            );
             c.load()?;
             columns.push(c);
         }
-        Ok(Self { columns })
+        if config.add_timestamp_column {
+            columns.push(Column::new(root_path, "timestamp".into(), DataType::Int));
+        }
+        Ok(Self { columns, config })
     }
 
     #[instrument]
     fn validate_fields(&self, params: &IndexParams) -> Result<(), ContainerError> {
-        if self.columns.len() != params.fields.len() {
+        let param_field_count = if self.config.add_timestamp_column {
+            debug!("Validate Param Field Count. Adding Timestamp Column");
+            params.fields.len() + 1
+        } else {
+            params.fields.len()
+        };
+
+        if self.columns.len() != param_field_count {
             return Err(ContainerError::FieldCountMismatch(
                 self.columns.len(),
                 params.fields.len(),
@@ -83,25 +101,44 @@ impl Container {
     pub fn index(&mut self, params: IndexParams) -> Result<(), ContainerError> {
         self.validate_fields(&params)?;
 
+        if self.config.add_timestamp_column {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            if let Some(timestamp_column) = self
+                .columns
+                .iter_mut()
+                .find(|column| column.name() == "timestamp")
+            {
+                timestamp_column.insert(Cell::UInt(timestamp))?;
+            } else {
+                error!(
+                    "Failed to insert timestamp for {:?} params. Couldn't find Column",
+                    params
+                );
+                return Err(ContainerError::MissingTimestampColumn);
+            }
+        }
+
         for (index, column_name) in params.fields.iter().enumerate() {
             let column_value = params.values.get(index).unwrap();
-            let column = self
+            let db_column = self
                 .columns
                 .iter_mut()
                 .find(|column| &column.name() == column_name)
                 .unwrap();
-            if column.data_type().is_compatible(column_value) {
+            if db_column.data_type().is_compatible(column_value) {
                 debug!("Store value {} for column {}", column_value, column_name);
                 if let Some(cell) = Cell::from_json_value(column_value) {
-                    column.insert(cell)?;
-                }
-                else {
+                    db_column.insert(cell)?;
+                } else {
                     error!("Incompatible data type for cell: {:?}", column_value);
                 }
             } else {
                 return Err(ContainerError::InvalidDataType(
                     column_value.clone(),
-                    column.data_type().clone(),
+                    db_column.data_type().clone(),
                 ));
             }
         }
@@ -112,13 +149,13 @@ impl Container {
     pub async fn query(&self, tx: Sender<Command>) {
         let num_rows = self.columns[0].entries().len();
         for n in 0..num_rows {
-            let mut row = vec!();
+            let mut row = vec![];
             for column in &self.columns {
                 let cell = column.entries().get(n).unwrap();
                 row.push(cell.clone());
             }
             match tx.send(Command::QueryRow { row }).await {
-                Ok(()) => {},
+                Ok(()) => {}
                 Err(err) => {
                     error!("SendError: {}", err);
                 }

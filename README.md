@@ -91,6 +91,7 @@ Example:
 
 ```json
 {
+  "add_timestamp_column": true,
   "columns": [
     {
       "name": "Url",
@@ -107,6 +108,10 @@ Example:
   ]
 }
 ```
+
+Options:
+
+- `add_timestamp_column`: Determines, if the database should automatically add a timestamp column or not. If yes, it autogenerates a timestamp for each entry on insert
 
 Available Data Types:
 
