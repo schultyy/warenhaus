@@ -163,3 +163,74 @@ impl Container {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        config::{ColumnConfig, DataTypeConfig, SchemaConfig},
+        storage::column::Cell,
+        web::IndexParams,
+    };
+    use std::sync::Once;
+    use super::Container;
+
+    static INIT: Once = Once::new();
+
+    
+    pub fn initialize() {
+        INIT.call_once(|| {
+            // initialization code here
+            let _ = std::fs::remove_file("/tmp/column_url");
+            let _ = std::fs::remove_file("/tmp/column_timestamp");
+        });
+    }
+
+
+    fn schema_config() -> SchemaConfig {
+        let columns = vec![ColumnConfig {
+            name: "url".into(),
+            data_type: DataTypeConfig::String,
+        }];
+        SchemaConfig {
+            columns,
+            add_timestamp_column: true,
+        }
+    }
+
+    #[test]
+    fn insert_a_record() {
+        initialize();
+        let mut container = Container::new("/tmp".into(), schema_config()).unwrap();
+
+        let params = IndexParams {
+            fields: vec!["url".into()],
+            values: vec![serde_json::Value::String("https://google.com".into())],
+        };
+        container.index(params).unwrap();
+
+        let ts_column = container
+            .columns
+            .iter()
+            .find(|c| c.name() == "timestamp")
+            .unwrap();
+        let url_column = container
+            .columns
+            .iter()
+            .find(|c| c.name() == "url")
+            .unwrap();
+        assert_eq!(
+            ts_column.entries().len(),
+            1,
+            "Timestamp not found: {:?}",
+            ts_column.entries()
+        );
+        assert_eq!(url_column.entries().len(), 1);
+
+        let url_cell = url_column.entries().get(0).unwrap();
+        if let Cell::String(str) = url_cell {
+            assert_eq!(str, "https://google.com");
+        } else {
+            assert!(false, "Failed to retrieve URL from column: {:?}", url_cell);
+        }
+    }
+}

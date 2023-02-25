@@ -173,6 +173,8 @@ impl Column {
         f.write_u32::<LittleEndian>(bytes.len() as u32)?;
         f.write_all(&bytes)?;
 
+        self.entries.push(cell);
+
         Ok(current_position)
     }
 
