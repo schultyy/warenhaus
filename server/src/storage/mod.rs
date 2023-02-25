@@ -166,6 +166,8 @@ impl Container {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use crate::{
         config::{ColumnConfig, DataTypeConfig, SchemaConfig},
         storage::column::Cell,
@@ -288,6 +290,26 @@ mod tests {
             fields: vec!["url".into()],
             values: vec![serde_json::Value::Null],
         };
+        let result = container.index(params);
+        assert!(result.is_err(), "Was expecting error on insert. Got {:?}", result);
+
+        let url_column = container
+            .columns
+            .iter()
+            .find(|c| c.name() == "url")
+            .unwrap();
+        assert_eq!(url_column.entries().len(), 0, "was expecting no url, found: {:?}", url_column.entries());
+    }
+
+    #[test]
+    fn reject_insert_when_data_type_is_incompatible() {
+        initialize();
+        let mut container = Container::new("/tmp".into(), schema_config_without_timestamp()).unwrap();
+        let params = IndexParams {
+            fields: vec!["url".into()],
+            values: vec![json!(2342)],
+        };
+
         let result = container.index(params);
         assert!(result.is_err(), "Was expecting error on insert. Got {:?}", result);
 
