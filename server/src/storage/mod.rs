@@ -56,7 +56,7 @@ pub enum AutoIndexError {
 #[derive(Debug, Serialize, Deserialize)]
 struct AutoIndex {
     counter: i64,
-    #[serde(skip_serializing)]
+    #[serde(skip_serializing, skip_deserializing)]
     file_path: String,
 }
 
