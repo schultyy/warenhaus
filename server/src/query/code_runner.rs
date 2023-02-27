@@ -48,28 +48,10 @@ impl CodeRunner {
         Ok(())
     }
 
+    ///runs a specific query for a single database row
+    ///Returns: boolean indicating if the row should be included in the result set
     #[tracing::instrument]
-    pub fn execute_map(&self, function_name: &str, row: Vec<Cell>) -> Result<i32> {
-        // let (resp_tx, resp_rx) = oneshot::channel();
-        self.run_map(function_name, row)
-
-        // self.manager_tx.send(Command::QueryData {
-        //     responder: resp_tx
-        // }).await?;
-
-        // match resp_rx.await {
-        //     Ok(columns) => {
-        //         self.run_map(function_name, columns)?;
-        //     },
-        //     Err(recv_error) => {
-        //         error!("Failed to receive response: {}", recv_error);
-        //         return Err(recv_error.into());
-        //     }
-        // }
-    }
-
-    #[tracing::instrument]
-    fn run_map(&self, function_name: &str, row: Vec<Cell>) -> Result<i32> {
+    pub fn execute_map(&self, function_name: &str, row: Vec<Cell>) -> Result<bool> {
         let base_path = Path::new(&self.compiled_query_storage_path);
         let filename = base_path.join(format!("{}.wat", function_name));
 
@@ -89,15 +71,16 @@ impl CodeRunner {
         let run = instance.get_typed_func::<i32, i32>(&mut store, "run")?;
 
         let cell = row.first().unwrap();
-        if let Cell::Int(num) = cell {
-            debug!("Calling function {} with {}", function_name, num);
-            let result = run.call(&mut store, (*num as i32).to_owned())?;
-            debug!("Call returned: {}", result != 0);
-            Ok(result)
+        if let Cell::Int(row_id) = cell {
+            debug!("Calling function {} with {}", function_name, row_id);
+            let should_be_included = run.call(&mut store, (*row_id as i32).to_owned())? != 0;
+            debug!("Call returned: {}", should_be_included);
+            Ok(should_be_included)
         }
         else {
             warn!("Failed to convert Cell {:?} into Number. Skipping wasm call", cell);
             Err(anyhow!("Failed to convert Cell {:?} into Number. Skipping wasm call", cell))
         }
+
     }
 }

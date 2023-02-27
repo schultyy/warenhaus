@@ -1,6 +1,9 @@
 pub mod column;
 pub mod data_type;
 
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
@@ -29,17 +32,88 @@ pub enum ContainerError {
     },
     #[error("Missing Timestamp Column")]
     MissingTimestampColumn,
+    #[error("Index Error")]
+    IndexError {
+        #[from]
+        source: AutoIndexError,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum AutoIndexError {
+    #[error("JSON Error")]
+    Json {
+        #[from]
+        source: serde_json::Error,
+    },
+    #[error("IO Error")]
+    Io {
+        #[from]
+        source: std::io::Error,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AutoIndex {
+    counter: i64,
+    #[serde(skip_serializing)]
+    file_path: String,
+}
+
+impl AutoIndex {
+    pub fn load_or_new(root_path: &str) -> Self {
+        let root_path = Path::new(root_path);
+        let file_path = root_path.join("auto_index");
+
+        match fs::read_to_string(file_path.clone()) {
+            Ok(str) => match serde_json::from_str::<Self>(&str) {
+                Ok(mut auto_index) => {
+                    auto_index.file_path = file_path.to_str().unwrap().to_string();
+                    return auto_index;
+                }
+                Err(serde_err) => {
+                    error!("Error while deserializing auto index: {}", serde_err);
+                }
+            },
+            Err(err) => {
+                error!("Failed to load auto index: {}", err);
+            }
+        }
+
+        Self {
+            counter: 0,
+            file_path: file_path.to_str().unwrap().to_string(),
+        }
+    }
+
+    pub fn next(&mut self) -> i64 {
+        self.counter += 1;
+        return self.counter;
+    }
+
+    pub fn rollback(&mut self) {
+        self.counter -= 1;
+    }
+
+    pub fn commit(&self) -> Result<(), AutoIndexError> {
+        let j = serde_json::to_string(self)?;
+        fs::write(&self.file_path, j)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
 pub struct Container {
     config: SchemaConfig,
     columns: Vec<Column>,
+    index_counter: AutoIndex,
 }
 
 impl Container {
     pub fn new(root_path: &str, config: SchemaConfig) -> Result<Self, ContainerError> {
         let mut columns = vec![];
+        let index_counter = AutoIndex::load_or_new(root_path);
+        columns.push(Column::new(root_path, "id".into(), DataType::Int));
         for column_config in config.columns.iter() {
             let mut c: Column = Column::new(
                 root_path,
@@ -52,16 +126,20 @@ impl Container {
         if config.add_timestamp_column {
             columns.push(Column::new(root_path, "timestamp".into(), DataType::Int));
         }
-        Ok(Self { columns, config })
+        Ok(Self {
+            columns,
+            config,
+            index_counter,
+        })
     }
 
     #[instrument(skip(self))]
     fn validate_fields(&self, params: &IndexParams) -> Result<(), ContainerError> {
         let param_field_count = if self.config.add_timestamp_column {
             debug!("Validate Param Field Count. Adding Timestamp Column");
-            params.fields.len() + 1
+            params.fields.len() + 2 // +1 for timestamp, +1 for id
         } else {
-            params.fields.len()
+            params.fields.len() + 1 //+1 for id
         };
 
         if self.columns.len() != param_field_count {
@@ -101,7 +179,9 @@ impl Container {
     pub fn index(&mut self, params: IndexParams) -> Result<(), ContainerError> {
         self.validate_fields(&params)?;
 
-        let mut to_be_inserted = vec!();
+        let mut to_be_inserted = vec![];
+
+        to_be_inserted.push(("id".to_string(), Cell::Int(self.index_counter.next())));
 
         if self.config.add_timestamp_column {
             let timestamp = SystemTime::now()
@@ -123,31 +203,37 @@ impl Container {
             }
         }
 
-        for (index, column_name) in params.fields.iter().enumerate() {
-            let column_value = params.values.get(index).unwrap();
-            let db_column = self
-                .columns
-                .iter()
-                .find(|column| &column.name() == column_name)
-                .unwrap();
-            if db_column.data_type().is_compatible(column_value) {
-                debug!("Store value {} for column {}", column_value, column_name);
-                if let Some(cell) = Cell::from_json_value(column_value) {
+        // We need an extra block here to not have the compiler complain
+        // about too many borrows down below
+        {
+            for (index, column_name) in params.fields.iter().enumerate() {
+                let column_value = params.values.get(index).unwrap();
+                let db_column = self.find_column(column_name).unwrap();
+                if db_column.data_type().is_compatible(column_value) {
+                    debug!("Store value {} for column {}", column_value, column_name);
+                    //We assume this conversion always works because we checked in the if statement above if the type is compatible
+                    let cell = Cell::from_json_value(column_value).unwrap();
                     to_be_inserted.push((column_name.to_owned(), cell));
                 } else {
-                    error!("Incompatible data type for cell: {:?}", column_value);
+                    //    //TODO: Rollback transaction
+                    // self.rollback();
+                    return Err(ContainerError::InvalidDataType(
+                        column_value.clone(),
+                        db_column.data_type().clone(),
+                    ));
                 }
-            } else {
-                return Err(ContainerError::InvalidDataType(
-                    column_value.clone(),
-                    db_column.data_type().clone(),
-                ));
             }
         }
 
         //COMMIT
         self.commit(to_be_inserted)?;
         Ok(())
+    }
+
+    fn find_column(&mut self, column_name: &str) -> Option<&mut Column> {
+        self.columns
+            .iter_mut()
+            .find(|column| column.name() == column_name)
     }
 
     #[instrument(skip(self))]
@@ -160,22 +246,30 @@ impl Container {
                 .unwrap();
             db_column.insert(cell)?;
         }
+        self.index_counter.commit()?;
         Ok(())
+    }
+
+    #[instrument(skip(self))]
+    fn rollback(&mut self) {
+        self.index_counter.rollback();
     }
 
     #[instrument(skip(self))]
     pub async fn query(&self, tx: Sender<Command>) {
         let num_rows = self.columns[0].entries().len();
+        debug!("Found {} Rows", num_rows);
         for n in 0..num_rows {
             let mut row = vec![];
             for column in &self.columns {
-                println!("n {} | num_rows: {}", n, num_rows);
-                println!("column.entries len: {}", column.entries().len());
                 let cell = column.entries().get(n).unwrap();
                 row.push(cell.clone());
             }
+            debug!("Compiled Row. Ready to send");
             match tx.send(Command::QueryRow { row }).await {
-                Ok(()) => {}
+                Ok(()) => {
+                    debug!("Successfully sent row");
+                },
                 Err(err) => {
                     error!("SendError: {}", err);
                 }
@@ -188,17 +282,16 @@ impl Container {
 mod tests {
     use serde_json::json;
 
+    use super::Container;
     use crate::{
         config::{ColumnConfig, DataTypeConfig, SchemaConfig},
         storage::column::Cell,
         web::IndexParams,
     };
     use std::sync::Once;
-    use super::Container;
 
     static INIT: Once = Once::new();
 
-    
     pub fn initialize() {
         INIT.call_once(|| {
             // initialization code here
@@ -238,7 +331,7 @@ mod tests {
             ColumnConfig {
                 name: "points".into(),
                 data_type: DataTypeConfig::Int,
-            }
+            },
         ];
         SchemaConfig {
             columns,
@@ -286,7 +379,8 @@ mod tests {
     #[test]
     fn insert_a_record_without_auto_timestamp_column() {
         initialize();
-        let mut container = Container::new("/tmp".into(), schema_config_without_timestamp()).unwrap();
+        let mut container =
+            Container::new("/tmp".into(), schema_config_without_timestamp()).unwrap();
 
         let params = IndexParams {
             fields: vec!["url".into()],
@@ -294,10 +388,7 @@ mod tests {
         };
         container.index(params).unwrap();
 
-        let ts_column = container
-            .columns
-            .iter()
-            .find(|c| c.name() == "timestamp");
+        let ts_column = container.columns.iter().find(|c| c.name() == "timestamp");
         let url_column = container
             .columns
             .iter()
@@ -308,7 +399,11 @@ mod tests {
             "Wasn't expecting timestamp column, yet it is present: {:?}",
             ts_column
         );
-        assert_eq!(url_column.entries().len(), 1, "was expecting one url, found more than one");
+        assert_eq!(
+            url_column.entries().len(),
+            1,
+            "was expecting one url, found more than one"
+        );
 
         let url_cell = url_column.entries().get(0).unwrap();
         if let Cell::String(str) = url_cell {
@@ -321,74 +416,117 @@ mod tests {
     #[test]
     fn fail_on_null_value() {
         initialize();
-        let mut container = Container::new("/tmp".into(), schema_config_without_timestamp()).unwrap();
+        let mut container =
+            Container::new("/tmp".into(), schema_config_without_timestamp()).unwrap();
 
         let params = IndexParams {
             fields: vec!["url".into()],
             values: vec![serde_json::Value::Null],
         };
         let result = container.index(params);
-        assert!(result.is_err(), "Was expecting error on insert. Got {:?}", result);
+        assert!(
+            result.is_err(),
+            "Was expecting error on insert. Got {:?}",
+            result
+        );
 
         let url_column = container
             .columns
             .iter()
             .find(|c| c.name() == "url")
             .unwrap();
-        assert_eq!(url_column.entries().len(), 0, "was expecting no url, found: {:?}", url_column.entries());
+        assert_eq!(
+            url_column.entries().len(),
+            0,
+            "was expecting no url, found: {:?}",
+            url_column.entries()
+        );
     }
 
     #[test]
     fn reject_insert_when_data_type_is_incompatible() {
         initialize();
-        let mut container = Container::new("/tmp".into(), schema_config_without_timestamp()).unwrap();
+        let mut container =
+            Container::new("/tmp".into(), schema_config_without_timestamp()).unwrap();
         let params = IndexParams {
             fields: vec!["url".into()],
             values: vec![json!(2342)],
         };
 
         let result = container.index(params);
-        assert!(result.is_err(), "Was expecting error on insert. Got {:?}", result);
+        assert!(
+            result.is_err(),
+            "Was expecting error on insert. Got {:?}",
+            result
+        );
 
         let url_column = container
             .columns
             .iter()
             .find(|c| c.name() == "url")
             .unwrap();
-        assert_eq!(url_column.entries().len(), 0, "was expecting no url, found: {:?}", url_column.entries());
+        assert_eq!(
+            url_column.entries().len(),
+            0,
+            "was expecting no url, found: {:?}",
+            url_column.entries()
+        );
     }
 
     #[test]
     fn reject_insert_for_all_cells_when_one_cell_fails() {
         initialize();
-        let mut container = Container::new("/tmp".into(), schema_config_with_timestamp_and_two_columns()).unwrap();
+        let mut container = Container::new(
+            "/tmp".into(),
+            schema_config_with_timestamp_and_two_columns(),
+        )
+        .unwrap();
         let params = IndexParams {
             fields: vec!["url".into(), "points".into()],
             values: vec!["https://google.com".into(), serde_json::Value::Null],
         };
 
         let result = container.index(params);
-        assert!(result.is_err(), "Was expecting error on insert. Got {:?}", result);
+        assert!(
+            result.is_err(),
+            "Was expecting error on insert. Got {:?}",
+            result
+        );
 
         let url_column = container
             .columns
             .iter()
             .find(|c| c.name() == "url")
             .unwrap();
-        assert_eq!(url_column.entries().len(), 0, "was expecting no url, found: {:?}", url_column.entries());
+        assert_eq!(
+            url_column.entries().len(),
+            0,
+            "was expecting no url, found: {:?}",
+            url_column.entries()
+        );
 
         let points_column = container
             .columns
             .iter()
             .find(|c| c.name() == "points")
             .unwrap();
-        assert_eq!(points_column.entries().len(), 0, "was expecting no points, found: {:?}", points_column.entries());
+        assert_eq!(
+            points_column.entries().len(),
+            0,
+            "was expecting no points, found: {:?}",
+            points_column.entries()
+        );
 
         let timestamp_column = container
             .columns
             .iter()
             .find(|c| c.name() == "timestamp")
             .unwrap();
-        assert_eq!(timestamp_column.entries().len(), 0, "was expecting no timestamp, found: {:?}", timestamp_column.entries());
+        assert_eq!(
+            timestamp_column.entries().len(),
+            0,
+            "was expecting no timestamp, found: {:?}",
+            timestamp_column.entries()
+        );
     }
 }

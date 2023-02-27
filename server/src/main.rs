@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
 
                     let code_runner = CodeRunner::new(compiled_map_fn_path().into()).expect("Failed to instatiate Code pipeline");
 
-                    let (tx, mut rx) = mpsc::channel(8);
+                    let (tx, mut rx) = mpsc::channel(10000);
 
                     storage_manager.query(tx).await;
                     debug!("Queried Storage Manager");
@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                             Command::QueryRow { row } => {
                                 debug!("Running Code for {:?}", row);
                                 match code_runner.execute_map(&fn_name, row.clone()) {
-                                    Ok(result) => if result != 0 {
+                                    Ok(should_include_row) => if should_include_row {
                                         rows.push(row);
                                     },
                                     Err(err) => {
@@ -89,15 +89,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                                     }
                                 }
                             },
-                            Command::EndOfQuery => {
-                                debug!("Received End of Query");
-                                break
-                            },
                             _ => {
-                                panic!("Unexpected Code Reached");
+                                panic!("Unexpected Code Reached: {:?}", payload);
                             }
                         }
                     }
+                    debug!("Received all rows");
                     match responder.send(Ok(rows)) {
                         Ok(()) => {},
                         Err(err) => {
@@ -105,7 +102,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>{
                         }
                     }
                 },
-                Command::EndOfQuery => panic!("Unexpected Code Reached: Command::EndOfQuery"),
                 Command::QueryRow { row: _row } => panic!("Unexpected Code Reached: Command::QueryRow"),
             }
         }
