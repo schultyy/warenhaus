@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-use crate::{web::Value, config::DataTypeConfig};
+use crate::config::DataTypeConfig;
+
+use serde_json::Value;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum DataType {
@@ -12,8 +14,12 @@ pub enum DataType {
 
 impl DataType {
     pub fn is_compatible(&self, other: &Value) -> bool {
-        let other : DataType = other.into();
-        self == &other
+        match self {
+            DataType::Int => other.is_i64(),
+            DataType::Float => other.is_f64(),
+            DataType::String => other.is_string(),
+            DataType::Boolean => other.is_boolean(),
+        }
     }
 }
 

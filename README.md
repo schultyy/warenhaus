@@ -32,7 +32,7 @@ Also, we rely on the AssemblyScript compiler to be present on the machine. We pr
 ### Test storing a new record:
 
 ```bash
-$ curl -v -XPOST localhost:3030/index -H "Content-Type: application/json" -d '{"fields": ["url", "imestamp"], "values": [{"String": "https://google.com"}, {"Int": 5454353}]}'
+$ curl -v -XPOST localhost:3030/index -H "Content-Type: application/json" -d '{"fields": ["url", "imestamp"], "values": ["https://google.com", 5454353]}'
 ```
 
 ### Querying Data
@@ -91,6 +91,7 @@ Example:
 
 ```json
 {
+  "add_timestamp_column": true,
   "columns": [
     {
       "name": "Url",
@@ -108,6 +109,10 @@ Example:
 }
 ```
 
+Options:
+
+- `add_timestamp_column`: Determines, if the database should automatically add a timestamp column or not. If yes, it autogenerates a timestamp for each entry on insert
+
 Available Data Types:
 
 | Type    | Corresponding Rust Type |
@@ -117,3 +122,36 @@ Available Data Types:
 | String  | `std::String`           |
 | Boolean | `bool`                  |
 
+### Kafka Client
+
+The Kafka Client consumes a given Kafka topic and inserts records into the database. 
+
+Before running the client, create a new `mapping.json`:
+
+```json
+[
+  {
+    "kafka_field": "title",
+    "database_field": "title",
+    "database_type": "String"
+  },
+  {
+    "kafka_field": "url",
+    "database_field": "url",
+    "database_type": "String"
+  },
+  {
+    "kafka_field": "points",
+    "database_field": "points",
+    "database_type": "Int"
+  }
+]
+```
+
+This file maps a Kafka field to the corresponding database field, including its data type.
+
+Once created, run the client like this:
+
+```
+$ cargo run -p kafka_client -- --kafka-topic docker --mapping-file-path mapping.json
+```

@@ -17,10 +17,12 @@ const TAG_I64 : u8 = 1;
 const TAG_F64 : u8 = 2;
 const TAG_STR : u8 = 3;
 const TAG_BOOL : u8 = 4;
+const TAG_UI128 : u8 = 5;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub enum Cell {
     Int(i64),
+    UInt(u128),
     Float(f64),
     String(String),
     Boolean(bool),
@@ -29,12 +31,36 @@ pub enum Cell {
 
 
 impl Cell {
+    pub fn from_json_value(json_value: &serde_json::Value) -> Option<Self> {
+        match json_value {
+            serde_json::Value::Null => None,
+            serde_json::Value::Bool(bool) => Some(Cell::Boolean(bool.to_owned())),
+            serde_json::Value::Number(num) => {
+                if num.is_i64() || num.is_u64() {
+                    Some(Cell::Int(num.as_i64().unwrap()))
+                }
+                else {
+                    Some(Cell::Float(num.as_f64().unwrap()))
+                }
+            },
+            serde_json::Value::String(str) => Some(Cell::String(str.into())),
+            serde_json::Value::Array(_) => None,
+            serde_json::Value::Object(_) => None,
+        }
+    }
+
+
     pub fn to_bytes(&self) -> Result<(u32, u8, ByteString), std::io::Error> {
         let (tag_byte, value) = match self {
             Cell::Int(val) => {
                 let mut value_buffer = Vec::new();
                 value_buffer.write_i64::<LittleEndian>(val.to_owned())?;
                 (TAG_I64, value_buffer)
+            },
+            Cell::UInt(val) => {
+                let mut value_buffer = Vec::new();
+                value_buffer.write_u128::<LittleEndian>(val.to_owned())?;
+                (TAG_UI128, value_buffer)
             },
             Cell::Float(val) => {
                 let mut value_buffer = Vec::new();
@@ -83,6 +109,11 @@ impl Cell {
             TAG_BOOL => {
                 cursor.read_i64::<LittleEndian>()
                     .map(|val| Some(Cell::Boolean(val == 1)))
+                    .unwrap_or(None)
+            },
+            TAG_UI128 => {
+                cursor.read_u128::<LittleEndian>()
+                    .map(|val| Some(Cell::UInt(val)))
                     .unwrap_or(None)
             },
             _ => None
@@ -141,6 +172,8 @@ impl Column {
         f.write_u8(tag_byte)?;
         f.write_u32::<LittleEndian>(bytes.len() as u32)?;
         f.write_all(&bytes)?;
+
+        self.entries.push(cell);
 
         Ok(current_position)
     }

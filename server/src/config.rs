@@ -3,7 +3,7 @@ use std::{fs::File, io::Read, path::Path};
 use serde::Deserialize;
 use tracing::instrument;
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub enum DataTypeConfig {
     Int,
     Float,
@@ -11,12 +11,14 @@ pub enum DataTypeConfig {
     Boolean,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct SchemaConfig {
     pub columns: Vec<ColumnConfig>,
+    ///Indicates wheter there should be an automatically generated timestamp column
+    pub add_timestamp_column: bool
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct ColumnConfig {
     pub name: String,
     pub data_type: DataTypeConfig,

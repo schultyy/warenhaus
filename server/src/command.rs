@@ -25,6 +25,5 @@ pub enum Command {
         fn_name: String,
         responder: ExecuteMapResponder,
     },
-    QueryRow { row: Vec<Cell> },
-    EndOfQuery
+    QueryRow { row: Vec<Cell> }
 }
