@@ -60,7 +60,7 @@ impl CodeRunner {
         let module = Module::from_file(&engine, filename)?;
         let mut store = Store::new(&engine, ());
 
-        let log_func = Func::wrap(&mut store, |_caller: Caller<'_, ()>| {
+        let _log_func = Func::wrap(&mut store, |_caller: Caller<'_, ()>| {
             println!("Logging");
         });
 

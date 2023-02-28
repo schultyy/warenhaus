@@ -1,6 +1,5 @@
 use crate::command::Command;
-use crate::{storage::column::Cell, query::wasm_error::WasmError};
-use crate::storage::data_type::DataType;
+use crate::query::wasm_error::WasmError;
 use bytes::BufMut;
 use futures::TryStreamExt;
 use reqwest::StatusCode;
