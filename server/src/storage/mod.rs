@@ -64,6 +64,11 @@ impl Container {
         if config.add_timestamp_column {
             columns.push(Column::new(root_path, "timestamp".into(), DataType::Int));
         }
+
+        for column in columns.iter_mut() {
+            column.load()?;
+        }
+
         Ok(Self {
             columns,
             config,

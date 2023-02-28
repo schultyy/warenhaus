@@ -28,7 +28,7 @@ impl AutoIndex {
                 }
             },
             Err(err) => {
-                error!("Failed to load auto index: {}", err);
+                error!("Failed to load auto index: {}. Setting Index to 0", err);
             }
         }
 
