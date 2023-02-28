@@ -19,7 +19,7 @@ const TAG_STR : u8 = 3;
 const TAG_BOOL : u8 = 4;
 const TAG_UI128 : u8 = 5;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub enum Cell {
     Int(i64),
     UInt(u128),

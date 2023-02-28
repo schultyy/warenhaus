@@ -292,6 +292,9 @@ mod tests {
             // initialization code here
             let _ = std::fs::remove_file("/tmp/column_url");
             let _ = std::fs::remove_file("/tmp/column_timestamp");
+            let _ = std::fs::remove_file("/tmp/column_points");
+            let _ = std::fs::remove_file("/tmp/column_id");
+            let _ = std::fs::remove_file("/tmp/auto_index");
         });
     }
 
@@ -523,5 +526,60 @@ mod tests {
             "was expecting no timestamp, found: {:?}",
             timestamp_column.entries()
         );
+    }
+
+    #[test]
+    fn rejected_insert_rolls_back_auto_index() {
+        initialize();
+        let mut container = Container::new(
+            "/tmp".into(),
+            schema_config_with_timestamp_and_two_columns(),
+        )
+        .unwrap();
+        let params = IndexParams {
+            fields: vec!["url".into(), "points".into()],
+            values: vec!["https://google.com".into(), serde_json::Value::Null],
+        };
+
+        assert_eq!(container.index_counter.counter, 0);
+
+        let result = container.index(params);
+        assert!(
+            result.is_err(),
+            "Was expecting error on insert. Got {:?}",
+            result
+        );
+        assert_eq!(container.index_counter.counter, 0);
+
+        let id_column = container.columns.iter().find(|c| c.name() == "id").unwrap();
+        assert_eq!(id_column.entries().len(), 0, "Was expecting zero entries in id column");
+    }
+
+    #[test]
+    fn successful_insert_increases_counter() {
+        initialize();
+        let mut container = Container::new(
+            "/tmp".into(),
+            schema_config_with_timestamp_and_two_columns(),
+        )
+        .unwrap();
+        let params = IndexParams {
+            fields: vec!["url".into(), "points".into()],
+            values: vec!["https://google.com".into(), 54.into()],
+        };
+
+        assert_eq!(container.index_counter.counter, 0);
+
+        let result = container.index(params);
+
+        assert!(result.is_ok(), "Expected Insert to be successful");
+
+        let id_column = container.columns.iter().find(|c| c.name() == "id").unwrap();
+
+        let inserted_value = id_column.entries().first().unwrap();
+        assert_eq!(inserted_value, &Cell::Int(1));
+
+        //Index starts counting at 0, therefore we expect the next id to be 1
+        assert_eq!(container.index_counter.counter, 1, "Expected Index Counter to have increased after commit");
     }
 }
