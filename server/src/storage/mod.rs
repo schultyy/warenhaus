@@ -1,9 +1,8 @@
 pub mod column;
 pub mod data_type;
+mod auto_index;
+pub mod auto_index_error;
 
-use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
@@ -15,6 +14,8 @@ use crate::config::SchemaConfig;
 use crate::storage::column::Cell;
 use crate::web::IndexParams;
 
+use self::auto_index::AutoIndex;
+use self::auto_index_error::AutoIndexError;
 use self::{column::Column, data_type::DataType};
 
 #[derive(Debug, Error)]
@@ -37,69 +38,6 @@ pub enum ContainerError {
         #[from]
         source: AutoIndexError,
     },
-}
-
-#[derive(Error, Debug)]
-pub enum AutoIndexError {
-    #[error("JSON Error")]
-    Json {
-        #[from]
-        source: serde_json::Error,
-    },
-    #[error("IO Error")]
-    Io {
-        #[from]
-        source: std::io::Error,
-    },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct AutoIndex {
-    counter: i64,
-    #[serde(skip_serializing, skip_deserializing)]
-    file_path: String,
-}
-
-impl AutoIndex {
-    pub fn load_or_new(root_path: &str) -> Self {
-        let root_path = Path::new(root_path);
-        let file_path = root_path.join("auto_index");
-
-        match fs::read_to_string(file_path.clone()) {
-            Ok(str) => match serde_json::from_str::<Self>(&str) {
-                Ok(mut auto_index) => {
-                    auto_index.file_path = file_path.to_str().unwrap().to_string();
-                    return auto_index;
-                }
-                Err(serde_err) => {
-                    error!("Error while deserializing auto index: {}", serde_err);
-                }
-            },
-            Err(err) => {
-                error!("Failed to load auto index: {}", err);
-            }
-        }
-
-        Self {
-            counter: 0,
-            file_path: file_path.to_str().unwrap().to_string(),
-        }
-    }
-
-    pub fn next(&mut self) -> i64 {
-        self.counter += 1;
-        return self.counter;
-    }
-
-    pub fn rollback(&mut self) {
-        self.counter -= 1;
-    }
-
-    pub fn commit(&self) -> Result<(), AutoIndexError> {
-        let j = serde_json::to_string(self)?;
-        fs::write(&self.file_path, j)?;
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
@@ -541,7 +479,7 @@ mod tests {
             values: vec!["https://google.com".into(), serde_json::Value::Null],
         };
 
-        assert_eq!(container.index_counter.counter, 0);
+        assert_eq!(container.index_counter.counter(), 0);
 
         let result = container.index(params);
         assert!(
@@ -549,7 +487,7 @@ mod tests {
             "Was expecting error on insert. Got {:?}",
             result
         );
-        assert_eq!(container.index_counter.counter, 0);
+        assert_eq!(container.index_counter.counter(), 0);
 
         let id_column = container.columns.iter().find(|c| c.name() == "id").unwrap();
         assert_eq!(id_column.entries().len(), 0, "Was expecting zero entries in id column");
@@ -568,7 +506,7 @@ mod tests {
             values: vec!["https://google.com".into(), 54.into()],
         };
 
-        assert_eq!(container.index_counter.counter, 0);
+        assert_eq!(container.index_counter.counter(), 0);
 
         let result = container.index(params);
 
@@ -580,6 +518,6 @@ mod tests {
         assert_eq!(inserted_value, &Cell::Int(1));
 
         //Index starts counting at 0, therefore we expect the next id to be 1
-        assert_eq!(container.index_counter.counter, 1, "Expected Index Counter to have increased after commit");
+        assert_eq!(container.index_counter.counter(), 1, "Expected Index Counter to have increased after commit");
     }
 }
