@@ -203,36 +203,31 @@ impl Container {
             }
         }
 
-        // We need an extra block here to not have the compiler complain
-        // about too many borrows down below
-        {
-            for (index, column_name) in params.fields.iter().enumerate() {
-                let column_value = params.values.get(index).unwrap();
-                let db_column = self.find_column(column_name).unwrap();
-                if db_column.data_type().is_compatible(column_value) {
-                    debug!("Store value {} for column {}", column_value, column_name);
-                    //We assume this conversion always works because we checked in the if statement above if the type is compatible
-                    let cell = Cell::from_json_value(column_value).unwrap();
-                    to_be_inserted.push((column_name.to_owned(), cell));
-                } else {
-                    //    //TODO: Rollback transaction
-                    // self.rollback();
-                    return Err(ContainerError::InvalidDataType(
+        for (index, column_name) in params.fields.iter().enumerate() {
+            let column_value = params.values.get(index).unwrap();
+            let db_column = self.find_column(column_name).unwrap();
+            let db_column_data_type = db_column.data_type().clone();
+            if db_column.data_type().is_compatible(column_value) {
+                debug!("Store value {} for column {}", column_value, column_name);
+                //We assume this conversion always works because we checked in the if statement above if the type is compatible
+                let cell = Cell::from_json_value(column_value).unwrap();
+                to_be_inserted.push((column_name.to_owned(), cell));
+            } else {
+                self.rollback();
+                return Err(ContainerError::InvalidDataType(
                         column_value.clone(),
-                        db_column.data_type().clone(),
-                    ));
-                }
+                        db_column_data_type,
+                        ));
             }
         }
 
-        //COMMIT
         self.commit(to_be_inserted)?;
         Ok(())
     }
 
-    fn find_column(&mut self, column_name: &str) -> Option<&mut Column> {
+    fn find_column(&self, column_name: &str) -> Option<&Column> {
         self.columns
-            .iter_mut()
+            .iter()
             .find(|column| column.name() == column_name)
     }
 
