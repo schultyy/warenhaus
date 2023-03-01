@@ -17,12 +17,10 @@ const TAG_I64 : u8 = 1;
 const TAG_F64 : u8 = 2;
 const TAG_STR : u8 = 3;
 const TAG_BOOL : u8 = 4;
-const TAG_UI128 : u8 = 5;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub enum Cell {
     Int(i64),
-    UInt(u128),
     Float(f64),
     String(String),
     Boolean(bool),
@@ -56,11 +54,6 @@ impl Cell {
                 let mut value_buffer = Vec::new();
                 value_buffer.write_i64::<LittleEndian>(val.to_owned())?;
                 (TAG_I64, value_buffer)
-            },
-            Cell::UInt(val) => {
-                let mut value_buffer = Vec::new();
-                value_buffer.write_u128::<LittleEndian>(val.to_owned())?;
-                (TAG_UI128, value_buffer)
             },
             Cell::Float(val) => {
                 let mut value_buffer = Vec::new();
@@ -109,11 +102,6 @@ impl Cell {
             TAG_BOOL => {
                 cursor.read_i64::<LittleEndian>()
                     .map(|val| Some(Cell::Boolean(val == 1)))
-                    .unwrap_or(None)
-            },
-            TAG_UI128 => {
-                cursor.read_u128::<LittleEndian>()
-                    .map(|val| Some(Cell::UInt(val)))
                     .unwrap_or(None)
             },
             _ => None

@@ -130,13 +130,13 @@ impl Container {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_millis();
+                .as_secs();
             if let Some(_timestamp_column) = self
                 .columns
                 .iter()
                 .find(|column| column.name() == "timestamp")
             {
-                to_be_inserted.push(("timestamp".to_string(), Cell::UInt(timestamp)));
+                to_be_inserted.push(("timestamp".to_string(), Cell::Int(timestamp as i64)));
             } else {
                 error!(
                     "Failed to insert timestamp for {:?} params. Couldn't find Column",
