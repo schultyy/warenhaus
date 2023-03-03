@@ -2,9 +2,10 @@ use std::fmt::Display;
 
 use crate::config::DataTypeConfig;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub enum DataType {
     Int,
     Float,
