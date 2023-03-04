@@ -1,22 +1,32 @@
-pub mod column;
-pub mod data_type;
 mod auto_index;
 pub mod auto_index_error;
+pub mod column;
+pub mod cell;
+pub mod data_type;
+pub mod column_frame;
 
+use std::fs;
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use crc::{CRC_32_CKSUM, Crc};
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
-use tracing::error;
+use tracing::log::warn;
 use tracing::{debug, instrument};
+use tracing::{error, info};
 
 use crate::command::Command;
 use crate::config::SchemaConfig;
-use crate::storage::column::Cell;
+use crate::storage::cell::Cell;
 use crate::web::IndexParams;
 
 use self::auto_index::AutoIndex;
 use self::auto_index_error::AutoIndexError;
+use self::column_frame::ColumnFrame;
 use self::{column::Column, data_type::DataType};
+
+pub type ByteString = Vec<u8>;
+pub const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_CKSUM);
 
 #[derive(Debug, Error)]
 pub enum ContainerError {
@@ -41,36 +51,171 @@ pub enum ContainerError {
 }
 
 #[derive(Debug)]
+struct ColumnLayout {
+    db_root_path: String,
+    columns: Vec<Column>,
+    column_names_ordered: Vec<(String, DataType)>,
+}
+
+impl ColumnLayout {
+    fn new(db_root_path: &str) -> Self {
+        Self {
+            db_root_path: db_root_path.into(),
+            columns: vec![],
+            column_names_ordered: vec![],
+        }
+    }
+
+    #[instrument(skip(self))]
+    pub fn insert_column(&mut self, new_column: Column) -> Result<(), std::io::Error> {
+        self.column_names_ordered.push((
+            new_column.name().to_string(),
+            new_column.data_type().clone(),
+        ));
+        self.columns.push(new_column);
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    pub fn load(&mut self) -> Result<(), std::io::Error> {
+        let root_path = Path::new(&self.db_root_path);
+        let file_path = root_path.join("column_layout.json");
+
+        let bytes = fs::read(file_path)?;
+        let file_contents = String::from_utf8(bytes)
+            .expect("Failed to load column_layout.json. Expected utf-8, got corrupted format");
+        self.column_names_ordered = serde_json::from_str(&file_contents)?;
+        for (column_name, data_type) in &self.column_names_ordered {
+            let mut c = Column::new(
+                &self.db_root_path,
+                column_name.to_string(),
+                data_type.to_owned(),
+            );
+            c.load()?;
+            self.columns.push(c);
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    pub fn persist_layout(&self) -> Result<(), std::io::Error> {
+        let json = serde_json::to_string(&self.column_names_ordered).unwrap();
+
+        let root_path = Path::new(&self.db_root_path);
+        let file_path = root_path.join("column_layout.json");
+
+        fs::write(file_path, json)?;
+        Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.columns.len()
+    }
+
+    pub fn column_names(&self) -> Vec<String> {
+        self.columns
+            .iter()
+            .map(|c| c.name().to_string())
+            .collect::<Vec<_>>()
+    }
+
+    pub fn timestamp_column(&self) -> Option<&Column> {
+        self.columns.iter().find(|c| c.name() == "timestamp")
+    }
+
+    pub fn find_column(&self, column_name: &str) -> Option<&Column> {
+        self.columns
+            .iter()
+            .find(|column| column.name() == column_name)
+    }
+
+    #[instrument(skip(self))]
+    pub fn commit(&mut self, values: Vec<(String, Cell)>) -> Result<(), ContainerError> {
+        for (column_name, cell) in values {
+            let db_column = self
+                .columns
+                .iter_mut()
+                .find(|column| column.name() == column_name)
+                .unwrap();
+            db_column.insert(cell)?;
+        }
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    pub fn all_rows(&self) -> Vec<ColumnFrame> {
+        let reference_length = self.columns[0].entries().len();
+        let length_check_passed = self
+            .columns
+            .iter()
+            .all(|c| c.entries().len() == reference_length);
+        if !length_check_passed {
+            panic!("Columns Corrupted. Not all columns contain the same number of entries");
+        }
+
+        let mut rows = vec![];
+
+        for n in 0..reference_length {
+            let mut frame = ColumnFrame::new();
+            for column in &self.columns {
+                let cell = column.entries().get(n).unwrap();
+                frame.insert(column.name(), cell.to_owned());
+            }
+            rows.push(frame);
+        }
+
+        rows
+    }
+}
+
+
+#[derive(Debug)]
 pub struct Container {
     config: SchemaConfig,
-    columns: Vec<Column>,
+    columns: ColumnLayout,
     index_counter: AutoIndex,
 }
 
 impl Container {
+    #[instrument]
     pub fn new(root_path: &str, config: SchemaConfig) -> Result<Self, ContainerError> {
-        let mut columns = vec![];
         let index_counter = AutoIndex::load_or_new(root_path);
-        columns.push(Column::new(root_path, "id".into(), DataType::Int));
-        for column_config in config.columns.iter() {
-            let mut c: Column = Column::new(
-                root_path,
-                column_config.name.to_string(),
-                column_config.data_type.to_owned().into(),
-            );
-            c.load()?;
-            columns.push(c);
-        }
-        if config.add_timestamp_column {
-            columns.push(Column::new(root_path, "timestamp".into(), DataType::Int));
-        }
+        let mut column_layout = ColumnLayout::new(root_path);
 
-        for column in columns.iter_mut() {
-            column.load()?;
+        info!("Try loading column layout");
+        let column_layout_load_result = column_layout.load();
+        if let Err(err) = column_layout_load_result {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                warn!("Column layout not found. Starting from scratch");
+                column_layout.insert_column(Column::new(root_path, "id".into(), DataType::Int))?;
+                for column_config in config.columns.iter() {
+                    let mut c: Column = Column::new(
+                        root_path,
+                        column_config.name.to_string(),
+                        column_config.data_type.to_owned().into(),
+                    );
+                    c.load()?;
+                    column_layout.insert_column(c)?;
+                }
+                if config.add_timestamp_column {
+                    info!(
+                        add_timestamp_column = config.add_timestamp_column,
+                        "Adding Timestamp Column"
+                    );
+                    let mut ts_column = Column::new(root_path, "timestamp".into(), DataType::Int);
+                    ts_column.load()?;
+                    column_layout.insert_column(ts_column)?;
+                }
+                info!("Persisting new column layout");
+                column_layout.persist_layout()?;
+            } else {
+                return Err(err.into());
+            }
         }
 
         Ok(Self {
-            columns,
+            columns: column_layout,
             config,
             index_counter,
         })
@@ -92,11 +237,7 @@ impl Container {
             ));
         }
 
-        let column_names = self
-            .columns
-            .iter()
-            .map(|c| c.name().to_string())
-            .collect::<Vec<_>>();
+        let column_names = self.columns.column_names();
         let invalid_fields = params
             .fields
             .iter()
@@ -131,11 +272,7 @@ impl Container {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            if let Some(_timestamp_column) = self
-                .columns
-                .iter()
-                .find(|column| column.name() == "timestamp")
-            {
+            if let Some(_timestamp_column) = self.columns.timestamp_column() {
                 to_be_inserted.push(("timestamp".to_string(), Cell::Int(timestamp as i64)));
             } else {
                 error!(
@@ -148,7 +285,7 @@ impl Container {
 
         for (index, column_name) in params.fields.iter().enumerate() {
             let column_value = params.values.get(index).unwrap();
-            let db_column = self.find_column(column_name).unwrap();
+            let db_column = self.columns.find_column(column_name).unwrap();
             let db_column_data_type = db_column.data_type().clone();
             if db_column.data_type().is_compatible(column_value) {
                 debug!("Store value {} for column {}", column_value, column_name);
@@ -158,9 +295,9 @@ impl Container {
             } else {
                 self.rollback();
                 return Err(ContainerError::InvalidDataType(
-                        column_value.clone(),
-                        db_column_data_type,
-                        ));
+                    column_value.clone(),
+                    db_column_data_type,
+                ));
             }
         }
 
@@ -168,22 +305,9 @@ impl Container {
         Ok(())
     }
 
-    fn find_column(&self, column_name: &str) -> Option<&Column> {
-        self.columns
-            .iter()
-            .find(|column| column.name() == column_name)
-    }
-
     #[instrument(skip(self))]
     fn commit(&mut self, values: Vec<(String, Cell)>) -> Result<(), ContainerError> {
-        for (column_name, cell) in values {
-            let db_column = self
-                .columns
-                .iter_mut()
-                .find(|column| column.name() == column_name)
-                .unwrap();
-            db_column.insert(cell)?;
-        }
+        self.columns.commit(values)?;
         self.index_counter.commit()?;
         Ok(())
     }
@@ -195,19 +319,11 @@ impl Container {
 
     #[instrument(skip(self))]
     pub async fn query(&self, tx: Sender<Command>) {
-        let num_rows = self.columns[0].entries().len();
-        debug!("Found {} Rows", num_rows);
-        for n in 0..num_rows {
-            let mut row = vec![];
-            for column in &self.columns {
-                let cell = column.entries().get(n).unwrap();
-                row.push(cell.clone());
-            }
-            debug!("Compiled Row. Ready to send");
+        for row in self.columns.all_rows() {
             match tx.send(Command::QueryRow { row }).await {
                 Ok(()) => {
                     debug!("Successfully sent row");
-                },
+                }
                 Err(err) => {
                     error!("SendError: {}", err);
                 }
@@ -223,22 +339,17 @@ mod tests {
     use super::Container;
     use crate::{
         config::{ColumnConfig, DataTypeConfig, SchemaConfig},
-        storage::column::Cell,
+        storage::cell::Cell,
         web::IndexParams,
     };
-    use std::sync::Once;
-
-    static INIT: Once = Once::new();
 
     pub fn initialize() {
-        INIT.call_once(|| {
-            // initialization code here
-            let _ = std::fs::remove_file("/tmp/column_url");
-            let _ = std::fs::remove_file("/tmp/column_timestamp");
-            let _ = std::fs::remove_file("/tmp/column_points");
-            let _ = std::fs::remove_file("/tmp/column_id");
-            let _ = std::fs::remove_file("/tmp/auto_index");
-        });
+        let _ = std::fs::remove_file("/tmp/column_url");
+        let _ = std::fs::remove_file("/tmp/column_timestamp");
+        let _ = std::fs::remove_file("/tmp/column_points");
+        let _ = std::fs::remove_file("/tmp/column_id");
+        let _ = std::fs::remove_file("/tmp/auto_index");
+        let _ = std::fs::remove_file("/tmp/column_layout.json");
     }
 
     fn schema_config_with_timestamp() -> SchemaConfig {
@@ -291,16 +402,9 @@ mod tests {
         };
         container.index(params).unwrap();
 
-        let ts_column = container
-            .columns
-            .iter()
-            .find(|c| c.name() == "timestamp")
-            .unwrap();
-        let url_column = container
-            .columns
-            .iter()
-            .find(|c| c.name() == "url")
-            .unwrap();
+        let ts_column = container.columns.find_column("timestamp").unwrap();
+        let url_column = container.columns.find_column("url").unwrap();
+
         assert_eq!(
             ts_column.entries().len(),
             1,
@@ -329,12 +433,8 @@ mod tests {
         };
         container.index(params).unwrap();
 
-        let ts_column = container.columns.iter().find(|c| c.name() == "timestamp");
-        let url_column = container
-            .columns
-            .iter()
-            .find(|c| c.name() == "url")
-            .unwrap();
+        let ts_column = container.columns.find_column("timestamp");
+        let url_column = container.columns.find_column("url").unwrap();
         assert!(
             ts_column.is_none(),
             "Wasn't expecting timestamp column, yet it is present: {:?}",
@@ -371,11 +471,7 @@ mod tests {
             result
         );
 
-        let url_column = container
-            .columns
-            .iter()
-            .find(|c| c.name() == "url")
-            .unwrap();
+        let url_column = container.columns.find_column("url").unwrap();
         assert_eq!(
             url_column.entries().len(),
             0,
@@ -401,11 +497,7 @@ mod tests {
             result
         );
 
-        let url_column = container
-            .columns
-            .iter()
-            .find(|c| c.name() == "url")
-            .unwrap();
+        let url_column = container.columns.find_column("url").unwrap();
         assert_eq!(
             url_column.entries().len(),
             0,
@@ -434,11 +526,7 @@ mod tests {
             result
         );
 
-        let url_column = container
-            .columns
-            .iter()
-            .find(|c| c.name() == "url")
-            .unwrap();
+        let url_column = container.columns.find_column("url").unwrap();
         assert_eq!(
             url_column.entries().len(),
             0,
@@ -446,11 +534,7 @@ mod tests {
             url_column.entries()
         );
 
-        let points_column = container
-            .columns
-            .iter()
-            .find(|c| c.name() == "points")
-            .unwrap();
+        let points_column = container.columns.find_column("points").unwrap();
         assert_eq!(
             points_column.entries().len(),
             0,
@@ -458,11 +542,7 @@ mod tests {
             points_column.entries()
         );
 
-        let timestamp_column = container
-            .columns
-            .iter()
-            .find(|c| c.name() == "timestamp")
-            .unwrap();
+        let timestamp_column = container.columns.find_column("timestamp").unwrap();
         assert_eq!(
             timestamp_column.entries().len(),
             0,
@@ -494,8 +574,12 @@ mod tests {
         );
         assert_eq!(container.index_counter.counter(), 0);
 
-        let id_column = container.columns.iter().find(|c| c.name() == "id").unwrap();
-        assert_eq!(id_column.entries().len(), 0, "Was expecting zero entries in id column");
+        let id_column = container.columns.find_column("id").unwrap();
+        assert_eq!(
+            id_column.entries().len(),
+            0,
+            "Was expecting zero entries in id column"
+        );
     }
 
     #[test]
@@ -517,12 +601,16 @@ mod tests {
 
         assert!(result.is_ok(), "Expected Insert to be successful");
 
-        let id_column = container.columns.iter().find(|c| c.name() == "id").unwrap();
+        let id_column = container.columns.find_column("id").unwrap();
 
         let inserted_value = id_column.entries().first().unwrap();
         assert_eq!(inserted_value, &Cell::Int(1));
 
         //Index starts counting at 0, therefore we expect the next id to be 1
-        assert_eq!(container.index_counter.counter(), 1, "Expected Index Counter to have increased after commit");
+        assert_eq!(
+            container.index_counter.counter(),
+            1,
+            "Expected Index Counter to have increased after commit"
+        );
     }
 }

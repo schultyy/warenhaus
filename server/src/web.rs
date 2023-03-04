@@ -217,6 +217,8 @@ async fn execute_map_fn(
     match resp_rx.await {
         Ok(execution_result) => match execution_result {
             Ok(rows) => {
+                // TODO: Convert column frames into something that's easy to print
+                // and readable
                 let json = warp::reply::json(&rows);
                 return Ok(warp::reply::with_status(json, StatusCode::OK));
             }
