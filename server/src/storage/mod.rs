@@ -1,12 +1,14 @@
 mod auto_index;
 pub mod auto_index_error;
 pub mod column;
+pub mod cell;
 pub mod data_type;
 pub mod column_frame;
 
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use crc::{CRC_32_CKSUM, Crc};
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 use tracing::log::warn;
@@ -15,13 +17,16 @@ use tracing::{error, info};
 
 use crate::command::Command;
 use crate::config::SchemaConfig;
-use crate::storage::column::Cell;
+use crate::storage::cell::Cell;
 use crate::web::IndexParams;
 
 use self::auto_index::AutoIndex;
 use self::auto_index_error::AutoIndexError;
 use self::column_frame::ColumnFrame;
 use self::{column::Column, data_type::DataType};
+
+pub type ByteString = Vec<u8>;
+pub const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_CKSUM);
 
 #[derive(Debug, Error)]
 pub enum ContainerError {
@@ -334,7 +339,7 @@ mod tests {
     use super::Container;
     use crate::{
         config::{ColumnConfig, DataTypeConfig, SchemaConfig},
-        storage::column::Cell,
+        storage::cell::Cell,
         web::IndexParams,
     };
     use std::sync::Once;

@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use super::column::Cell;
+use super::cell::Cell;
 
 #[derive(Serialize, Debug, Clone)]
 pub struct ColumnFrame {
