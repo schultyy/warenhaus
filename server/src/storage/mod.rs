@@ -344,17 +344,17 @@ mod tests {
     };
     use std::sync::Once;
 
-    static INIT: Once = Once::new();
+    // static INIT: Once = Once::new();
 
     pub fn initialize() {
-        INIT.call_once(|| {
+        // INIT.call_once(|| {
             // initialization code here
             let _ = std::fs::remove_file("/tmp/column_url");
             let _ = std::fs::remove_file("/tmp/column_timestamp");
             let _ = std::fs::remove_file("/tmp/column_points");
             let _ = std::fs::remove_file("/tmp/column_id");
             let _ = std::fs::remove_file("/tmp/auto_index");
-        });
+        // });
     }
 
     fn schema_config_with_timestamp() -> SchemaConfig {
