@@ -2,7 +2,7 @@ use tokio::sync::oneshot;
 
 use crate::{
     query::wasm_error::WasmError,
-    storage::{column::Cell, ContainerError, ColumnFrame},
+    storage::{ContainerError, column_frame::ColumnFrame},
     web::IndexParams,
 };
 

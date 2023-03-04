@@ -5,8 +5,7 @@ use tracing::{debug, error, log::warn};
 use wasmtime::*;
 
 use crate::{
-    query::AssemblyScriptCompiler,
-    storage::{column::Cell, ColumnFrame},
+    query::AssemblyScriptCompiler, storage::column_frame::ColumnFrame,
 };
 
 use super::wasm_error::WasmError;
