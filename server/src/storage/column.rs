@@ -26,8 +26,6 @@ pub enum Cell {
     Boolean(bool),
 }
 
-
-
 impl Cell {
     pub fn from_json_value(json_value: &serde_json::Value) -> Option<Self> {
         match json_value {
@@ -46,7 +44,6 @@ impl Cell {
             serde_json::Value::Object(_) => None,
         }
     }
-
 
     pub fn to_bytes(&self) -> Result<(u32, u8, ByteString), std::io::Error> {
         let (tag_byte, value) = match self {
@@ -104,6 +101,13 @@ impl Cell {
                     .map(|val| Some(Cell::Boolean(val == 1)))
                     .unwrap_or(None)
             },
+            _ => None
+        }
+    }
+
+    pub fn as_int(&self) -> Option<&i64> {
+        match self {
+            Cell::Int(val) => Some(val),
             _ => None
         }
     }

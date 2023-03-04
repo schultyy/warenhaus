@@ -6,11 +6,12 @@ pub mod data_type;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
-use tracing::{error, info};
 use tracing::log::warn;
 use tracing::{debug, instrument};
+use tracing::{error, info};
 
 use crate::command::Command;
 use crate::config::SchemaConfig;
@@ -137,7 +138,7 @@ impl ColumnLayout {
     }
 
     #[instrument(skip(self))]
-    pub fn all_rows(&self) -> Vec<Vec<Cell>> {
+    pub fn all_rows(&self) -> Vec<ColumnFrame> {
         let reference_length = self.columns[0].entries().len();
         let length_check_passed = self
             .columns
@@ -148,17 +149,47 @@ impl ColumnLayout {
         }
 
         let mut rows = vec![];
+
         for n in 0..reference_length {
-            let mut row = vec![];
+            let mut frame = ColumnFrame::new();
             for column in &self.columns {
                 let cell = column.entries().get(n).unwrap();
-                row.push(cell.clone());
+                frame.insert(column.name(), cell.to_owned());
             }
-
-            rows.push(row);
+            rows.push(frame);
         }
 
         rows
+    }
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct ColumnFrame {
+    column_names: Vec<String>,
+    column_values: Vec<Cell>,
+}
+
+impl ColumnFrame {
+    pub fn new() -> Self {
+        Self {
+            column_names: vec![],
+            column_values: vec![],
+        }
+    }
+
+    pub fn insert(&mut self, column_name: &str, cell: Cell) {
+        self.column_names.push(column_name.to_owned());
+        self.column_values.push(cell);
+    }
+
+    pub fn get(&self, column_name: &str) -> Option<&Cell> {
+        if let Some(index) = self.column_names.iter().position(|c| c == column_name) {
+            let cell = self.column_values.get(index).expect("Encountered ColumnFrame. Internal Index Mismatch");
+            Some(cell)
+        }
+        else {
+            None
+        }
     }
 }
 
@@ -191,7 +222,10 @@ impl Container {
                     column_layout.insert_column(c)?;
                 }
                 if config.add_timestamp_column {
-                    info!(add_timestamp_column=config.add_timestamp_column, "Adding Timestamp Column");
+                    info!(
+                        add_timestamp_column = config.add_timestamp_column,
+                        "Adding Timestamp Column"
+                    );
                     let mut ts_column = Column::new(root_path, "timestamp".into(), DataType::Int);
                     ts_column.load()?;
                     column_layout.insert_column(ts_column)?;

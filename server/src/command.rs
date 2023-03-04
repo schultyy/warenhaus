@@ -2,13 +2,13 @@ use tokio::sync::oneshot;
 
 use crate::{
     query::wasm_error::WasmError,
-    storage::{column::Cell, ContainerError},
+    storage::{column::Cell, ContainerError, ColumnFrame},
     web::IndexParams,
 };
 
 pub type InsertResponder = oneshot::Sender<Result<(), ContainerError>>;
 pub type InsertMapFnResponder = oneshot::Sender<Result<(), WasmError>>;
-pub type ExecuteMapResponder = oneshot::Sender<Result<Vec<Vec<Cell>>, WasmError>>;
+pub type ExecuteMapResponder = oneshot::Sender<Result<Vec<ColumnFrame>, WasmError>>;
 
 #[derive(Debug)]
 pub enum Command {
@@ -25,5 +25,5 @@ pub enum Command {
         fn_name: String,
         responder: ExecuteMapResponder,
     },
-    QueryRow { row: Vec<Cell> }
+    QueryRow { row: ColumnFrame }
 }
