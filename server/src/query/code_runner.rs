@@ -7,6 +7,7 @@ use wasmtime::*;
 use crate::{
     query::AssemblyScriptCompiler, storage::column_frame::ColumnFrame,
 };
+use chrono::{DateTime, NaiveDateTime, Utc, Local, NaiveDate};
 
 use super::wasm_error::WasmError;
 
@@ -59,18 +60,26 @@ impl CodeRunner {
 
         debug!("Loading wasm file {:?}", filename);
         let engine = Engine::default();
+        let mut linker = Linker::new(&engine);
         let module = Module::from_file(&engine, filename)?;
         let mut store = Store::new(&engine, ());
 
-        let _log_func = Func::wrap(&mut store, |_caller: Caller<'_, ()>| {
-            println!("Logging");
-        });
+        linker.allow_unknown_exports(true);
+        linker.func_wrap("env", "log", |value: i32| {
+            println!(">> {}", value);
+        })?;
 
-        // let imports = [log_func.into()];
-        let imports = [];
-        let instance = Instance::new(&mut store, &module, &imports)?;
+        linker.func_wrap("env", "is_today", |timestamp: i32| -> i32 {
+            let ts = NaiveDateTime::from_timestamp_opt(timestamp as i64, 0).unwrap();
+            let dt: DateTime<Local> = Local::now();
+            let result = ts.date() == dt.date_naive();
 
-        let run = instance.get_typed_func::<i32, i32>(&mut store, "run")?;
+            return result as i32
+        })?;
+
+        let instance = linker.instantiate(&mut store, &module)?;
+
+        let run = instance.get_typed_func::<i32, i32>(&mut store, "run").unwrap();
 
         let id_cell = row.get("id").ok_or_else(||anyhow!("Expected ID - found None"))?;
         let timestamp_cell = row.get("timestamp").ok_or_else(||anyhow!("Expected timestamp - Found None"))?;
