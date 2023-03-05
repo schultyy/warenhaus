@@ -1,11 +1,11 @@
-use crate::command::Command;
+use crate::{command::Command, storage::cell::Cell};
 use crate::query::wasm_error::WasmError;
 use bytes::BufMut;
 use futures::TryStreamExt;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use tokio::sync::oneshot;
-use std::convert::Infallible;
+use std::{convert::Infallible, collections::HashMap};
 use tracing::error;
 use warp::multipart::{FormData, Part};
 
@@ -219,6 +219,7 @@ async fn execute_map_fn(
             Ok(rows) => {
                 // TODO: Convert column frames into something that's easy to print
                 // and readable
+                let rows : Vec<HashMap<String, Cell>> = rows.iter().map(|r| r.to_view_object()).collect();
                 let json = warp::reply::json(&rows);
                 return Ok(warp::reply::with_status(json, StatusCode::OK));
             }

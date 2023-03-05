@@ -9,7 +9,7 @@ const TAG_F64 : u8 = 2;
 const TAG_STR : u8 = 3;
 const TAG_BOOL : u8 = 4;
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Cell {
     Int(i64),
     Float(f64),
@@ -101,5 +101,18 @@ impl Cell {
             Cell::Int(val) => Some(val),
             _ => None
         }
+    }
+}
+
+impl Serialize for Cell {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+            match self {
+                Cell::Int(val) => serializer.serialize_i64(val.to_owned()),
+                Cell::Float(val) => serializer.serialize_f64(val.to_owned()),
+                Cell::String(str) => serializer.serialize_str(&str),
+                Cell::Boolean(bool) => serializer.serialize_bool(bool.to_owned()),
+            }
     }
 }

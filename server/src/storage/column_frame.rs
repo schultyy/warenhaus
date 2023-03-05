@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::Serialize;
 
 use super::cell::Cell;
@@ -29,5 +31,16 @@ impl ColumnFrame {
         else {
             None
         }
+    }
+
+    pub fn to_view_object(&self) -> HashMap<String, Cell> {
+        let mut map = HashMap::new();
+        for i in 0..self.column_names.len() {
+            let column = self.column_names[i].to_owned();
+            let column_value = self.column_values[i].to_owned();
+            map.insert(column, column_value);
+        }
+
+        map
     }
 }
