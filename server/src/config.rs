@@ -31,9 +31,9 @@ pub struct Configurator {
 
 impl Configurator {
     #[instrument]
-    pub fn new() -> Self {
+    pub fn new(root_path: &str) -> Self {
         Self {
-            root_path: ".".into(),
+            root_path: root_path.into(),
         }
     }
 

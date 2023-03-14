@@ -1,4 +1,5 @@
 use crate::{storage::Container, query::code_runner::CodeRunner, command::Command};
+use anyhow::Context;
 use config::Configurator;
 
 use tokio::sync::mpsc;
@@ -18,15 +19,19 @@ fn compiled_map_fn_path() -> &'static str {
     "queries"
 }
 
+fn config_file_root_path() -> String {
+    std::env::var("CONFIG_FILE_ROOT_PATH").context("Missing CONFIG_FILE_ROOT_PATH environment variable").unwrap()
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>>{
+async fn main() -> anyhow::Result<()>{
     tracing_subscriber::fmt::init();
 
     let (manager_tx, mut rx) = mpsc::channel(8192);
     let web_tx = manager_tx.clone();
     let mut all_workers = vec![];
-    let configurator = Configurator::new();
-    let config = configurator.load()?;
+    let configurator = Configurator::new(&config_file_root_path());
+    let config = configurator.load().context("Failed to load ./schema.json")?;
     let url_manager = tokio::spawn(async move {
         let mut storage_manager = Container::new(database_storage_root_path(), config).expect("failed to load container");
         while let Some(command) = rx.recv().await {
