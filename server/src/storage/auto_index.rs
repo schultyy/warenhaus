@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fs, path::{Path, PathBuf}};
 
 use serde::{Serialize, Deserialize};
 use tracing::error;
@@ -13,7 +13,7 @@ pub struct AutoIndex {
 }
 
 impl AutoIndex {
-    pub fn load_or_new(root_path: &str) -> Self {
+    pub fn load_or_new(root_path: &PathBuf) -> Self {
         let root_path = Path::new(root_path);
         let file_path = root_path.join("auto_index");
 
