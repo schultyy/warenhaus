@@ -1,7 +1,7 @@
 use std::{fs::File, io::Read, path::Path};
 
 use serde::Deserialize;
-use tracing::instrument;
+use tracing::{instrument, info};
 
 #[derive(Deserialize, Clone, Debug)]
 pub enum DataTypeConfig {
@@ -31,9 +31,9 @@ pub struct Configurator {
 
 impl Configurator {
     #[instrument]
-    pub fn new() -> Self {
+    pub fn new(root_path: &str) -> Self {
         Self {
-            root_path: ".".into(),
+            root_path: root_path.into(),
         }
     }
 
@@ -45,6 +45,7 @@ impl Configurator {
         let mut data = String::new();
         file.read_to_string(&mut data).unwrap();
         let data: SchemaConfig = serde_json::from_str(&data)?;
+        info!("Loaded configuration: {:?}", data);
         Ok(data)
     }
 }

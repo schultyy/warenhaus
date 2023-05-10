@@ -6,7 +6,7 @@ pub mod data_type;
 pub mod column_frame;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use crc::{CRC_32_CKSUM, Crc};
 use thiserror::Error;
@@ -52,13 +52,13 @@ pub enum ContainerError {
 
 #[derive(Debug)]
 struct ColumnLayout {
-    db_root_path: String,
+    db_root_path: PathBuf,
     columns: Vec<Column>,
     column_names_ordered: Vec<(String, DataType)>,
 }
 
 impl ColumnLayout {
-    fn new(db_root_path: &str) -> Self {
+    fn new(db_root_path: &PathBuf) -> Self {
         Self {
             db_root_path: db_root_path.into(),
             columns: vec![],
@@ -179,7 +179,7 @@ pub struct Container {
 
 impl Container {
     #[instrument]
-    pub fn new(root_path: &str, config: SchemaConfig) -> Result<Self, ContainerError> {
+    pub fn new(root_path: &PathBuf, config: SchemaConfig) -> Result<Self, ContainerError> {
         let index_counter = AutoIndex::load_or_new(root_path);
         let mut column_layout = ColumnLayout::new(root_path);
 
@@ -334,6 +334,8 @@ impl Container {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
+
     use serde_json::json;
 
     use super::Container;
@@ -394,7 +396,7 @@ mod tests {
     #[test]
     fn insert_a_record_with_auto_timestamp_column() {
         initialize();
-        let mut container = Container::new("/tmp".into(), schema_config_with_timestamp()).unwrap();
+        let mut container = Container::new(&Path::new("/tmp").to_path_buf(), schema_config_with_timestamp()).unwrap(); 
 
         let params = IndexParams {
             fields: vec!["url".into()],
@@ -425,7 +427,7 @@ mod tests {
     fn insert_a_record_without_auto_timestamp_column() {
         initialize();
         let mut container =
-            Container::new("/tmp".into(), schema_config_without_timestamp()).unwrap();
+            Container::new(&Path::new("/tmp").to_path_buf(), schema_config_without_timestamp()).unwrap();
 
         let params = IndexParams {
             fields: vec!["url".into()],
@@ -458,7 +460,7 @@ mod tests {
     fn fail_on_null_value() {
         initialize();
         let mut container =
-            Container::new("/tmp".into(), schema_config_without_timestamp()).unwrap();
+            Container::new(&Path::new("/tmp").to_path_buf(), schema_config_without_timestamp()).unwrap();
 
         let params = IndexParams {
             fields: vec!["url".into()],
@@ -484,7 +486,7 @@ mod tests {
     fn reject_insert_when_data_type_is_incompatible() {
         initialize();
         let mut container =
-            Container::new("/tmp".into(), schema_config_without_timestamp()).unwrap();
+            Container::new(&Path::new("/tmp").to_path_buf(), schema_config_without_timestamp()).unwrap();
         let params = IndexParams {
             fields: vec!["url".into()],
             values: vec![json!(2342)],
@@ -510,7 +512,7 @@ mod tests {
     fn reject_insert_for_all_cells_when_one_cell_fails() {
         initialize();
         let mut container = Container::new(
-            "/tmp".into(),
+            &Path::new("/tmp").to_path_buf(),
             schema_config_with_timestamp_and_two_columns(),
         )
         .unwrap();
@@ -555,7 +557,7 @@ mod tests {
     fn rejected_insert_rolls_back_auto_index() {
         initialize();
         let mut container = Container::new(
-            "/tmp".into(),
+            &Path::new("/tmp").to_path_buf(),
             schema_config_with_timestamp_and_two_columns(),
         )
         .unwrap();
@@ -586,7 +588,7 @@ mod tests {
     fn successful_insert_increases_counter() {
         initialize();
         let mut container = Container::new(
-            "/tmp".into(),
+            &Path::new("/tmp").to_path_buf(),
             schema_config_with_timestamp_and_two_columns(),
         )
         .unwrap();

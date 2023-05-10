@@ -1,8 +1,11 @@
+use std::{path::{Path, PathBuf}, fs};
+
 use crate::{storage::Container, query::code_runner::CodeRunner, command::Command};
+use anyhow::Context;
 use config::Configurator;
 
 use tokio::sync::mpsc;
-use tracing::{error, debug};
+use tracing::{error, debug, instrument, info};
 
 mod storage;
 mod web;
@@ -10,25 +13,51 @@ mod config;
 mod query;
 mod command;
 
-fn database_storage_root_path() -> &'static str {
-    "db"
+fn database_storage_root_path() -> PathBuf {
+    let db_storage_base_path_str = std::env::var("DB_STORAGE_PATH").context("Missing DB_STORAGE_PATH environment variable").unwrap();
+    let db_storage_path = Path::new(&db_storage_base_path_str).join("db");
+    db_storage_path
 }
 
 fn compiled_map_fn_path() -> &'static str {
     "queries"
 }
 
+fn config_file_root_path() -> String {
+    std::env::var("CONFIG_FILE_ROOT_PATH").context("Missing CONFIG_FILE_ROOT_PATH environment variable").unwrap()
+}
+
+#[instrument]
+fn ensure_folders(root_path: &str) -> Result<(), std::io::Error> {
+    let db_path = Path::new(root_path).join("db");
+    if db_path.exists() {
+        info!("{:?} exists - moving on", db_path);
+        return Ok(());
+    }
+
+    info!("{:?} does not exist - creating directory", db_path);
+    fs::create_dir(db_path)?;
+    Ok(())
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>>{
+async fn main() -> anyhow::Result<()>{
     tracing_subscriber::fmt::init();
+    ctrlc::set_handler(move || {
+        std::process::exit(0)
+    })
+        .expect("Error setting Ctrl-C handler");
 
     let (manager_tx, mut rx) = mpsc::channel(8192);
     let web_tx = manager_tx.clone();
     let mut all_workers = vec![];
-    let configurator = Configurator::new();
-    let config = configurator.load()?;
+
+    ensure_folders(&config_file_root_path())?;
+
+    let configurator = Configurator::new(&config_file_root_path());
+    let config = configurator.load().context("Failed to load ./schema.json")?;
     let url_manager = tokio::spawn(async move {
-        let mut storage_manager = Container::new(database_storage_root_path(), config).expect("failed to load container");
+        let mut storage_manager = Container::new(&database_storage_root_path(), config).expect("failed to load container");
         while let Some(command) = rx.recv().await {
             debug!("Received Command: {:?}", command);
             match command {

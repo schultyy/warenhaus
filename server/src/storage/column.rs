@@ -5,6 +5,7 @@ use std::io;
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter, SeekFrom};
 use std::path::Path;
+use std::path::PathBuf;
 
 use crate::storage::ByteString;
 use crate::storage::CRC32;
@@ -22,7 +23,7 @@ pub struct Column {
 }
 
 impl Column {
-    pub fn new(root_path: &str, name: String, data_type: DataType) -> Self {
+    pub fn new(root_path: &PathBuf, name: String, data_type: DataType) -> Self {
         let root_path = Path::new(root_path);
         let file_path = root_path.join(format!("column_{}", name));
         let f = OpenOptions::new()
