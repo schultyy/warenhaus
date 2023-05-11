@@ -48,6 +48,8 @@ async fn main() -> anyhow::Result<()>{
     })
         .expect("Error setting Ctrl-C handler");
 
+    let database_storage_path = database_storage_root_path();
+
     let (manager_tx, mut rx) = mpsc::channel(8192);
     let web_tx = manager_tx.clone();
     let mut all_workers = vec![];
@@ -57,7 +59,7 @@ async fn main() -> anyhow::Result<()>{
     let configurator = Configurator::new(&config_file_root_path());
     let config = configurator.load().context("Failed to load ./schema.json")?;
     let url_manager = tokio::spawn(async move {
-        let mut storage_manager = Container::new(&database_storage_root_path(), config).expect("failed to load container");
+        let mut storage_manager = Container::new(&database_storage_path, config).expect("failed to load container");
         while let Some(command) = rx.recv().await {
             debug!("Received Command: {:?}", command);
             match command {
