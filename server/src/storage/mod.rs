@@ -237,6 +237,12 @@ impl Container {
             ));
         }
 
+        if self.config.add_timestamp_column {
+            if params.fields.iter().find(|column_name| column_name == &"timestamp").is_some() {
+                return Err(ContainerError::InvalidFields(vec!["timestamp".into()]))
+            }
+        }
+
         let column_names = self.columns.column_names();
         let invalid_fields = params
             .fields
@@ -614,5 +620,23 @@ mod tests {
             1,
             "Expected Index Counter to have increased after commit"
         );
+    }
+
+    #[test]
+    fn reject_timestamp_value_when_autotimestamp_is_on() {
+        initialize();
+        let mut container = Container::new(
+            &Path::new("/tmp").to_path_buf(),
+            schema_config_with_timestamp_and_two_columns(),
+        )
+        .unwrap();
+        let params = IndexParams {
+            fields: vec!["url".into(), "timestamp".into()],
+            values: vec!["https://google.com".into(), 54.into()],
+        };
+
+        let result = container.index(params);
+
+        assert!(result.is_err(), "Expected Insert to fail");
     }
 }
